@@ -18,12 +18,17 @@ class Cli:
     self._buffer = ""
     self._stdscr = stdscr
     self._stdscr.scrollok(True)
+    curses.use_default_colors()
+    curses.start_color()
+    for i in range(0, curses.COLORS):
+      curses.init_pair(i + 1, i, -1)
 
   def cli_print(self, msg, color="NONE"):
     if color == "NONE":
       self.safe_addstr(msg)
     else:
       self.safe_addstr(msg, color)
+    self._stdscr.refresh()
 
   def cli_input(self, prompt):
     self._buffer = ""

@@ -5,6 +5,7 @@ import time
 import curses
 from cli import Cli, red, blue, green, brown
 from datetime import datetime
+import sys
 
 # [
 #   {
@@ -20,7 +21,7 @@ armor_types = ['electric', 'fire', 'poison', 'base', 'hero_dmg', 'hero_hp', 'her
 class Index:
 
   img = []
-  index = {}
+  index = []
   stage = 0
   cli = None
 
@@ -29,9 +30,10 @@ class Index:
 
   def __init__(self):
     self.img = []
-    self.index = {}
+    self.index = []
     self.stage = 0
     self.cli = None
+    self.start_index = 0
 
   def process_special_cmd(self, input):
     if input == 'reshow':
@@ -96,15 +98,10 @@ class Index:
       json.dump(data, fp)
       exit()
 
-  def main_loop(self, stdscr):
-    self.cli = Cli(stdscr, armor_types + ['reshow', 'correct', 'break'])
-    curses.use_default_colors()
-    curses.start_color()
-    for i in range(0, curses.COLORS):
-      curses.init_pair(i + 1, i, -1)
+  def collect_loop(self, stdscr):
     files = sorted(os.listdir('data/process/'))
-    self.index = []
-    i = 0
+    i = self.start_index
+    self.start_index = 0
     while i <  len(files):
       file_name = files[i]
       data = {}
@@ -119,18 +116,15 @@ class Index:
       data['file_name'] = file_name
       self.index.append(data)
       i += 1
-      if i % 5 == 0:
+      if i % 100 == 0:
         self.cli.cli_print("\nComplete %d of %d.  Auto-saving work.\n" % (i, len(files)))
         self.write_file("autosave-")
-      if i % 10 == 0:
+      elif i % 10 == 0:
         self.cli.cli_print("\nComplete %d of %d\n" % (i, len(files)))
-      if i % 25 == 0:
-        break
 
-    self.stage = 1
-    self.cli.cli_print("Congratulations, data entry is complete, you will now have a chance to correct the data\n")
-    time.sleep(3)
-    i = 0
+  def correct_loop(self, stdscr):
+    i = self.start_index
+    self.start_index = 0
     while i < len(self.index):
       correct = " "
       data = self.index[i]
@@ -150,9 +144,9 @@ class Index:
         self.cli.cli_print("\n")
         self.show_img()
         correct = self.cli.cli_input("Correct the data?\n>")
-        if input == 'reshow':
+        if correct == 'reshow':
           continue
-        elif input == 'break':
+        elif correct == 'break':
           self.write_file("manual-")
           self.save_progress({'stage': self.stage, 'idx': len(self.index)})
         elif correct != "":
@@ -164,7 +158,34 @@ class Index:
             new_data = tmp
             new_data['file_name'] = data['file_name']
             data = new_data
+      if i % 50 == 0:
+        self.cli.cli_print("\nComplete %d of %d\n" % (i, len(files)))
       i += 1
+    self.write_file("correction-complete")
+    self.cli.cli_print("Congratulations, data correction is complete, this prompt will now exit\n")
+    time.sleep(3)
+
+  def main_loop(self, stdscr):
+    self.cli = Cli(stdscr, armor_types + ['reshow', 'correct', 'break'])
+    if len(sys.argv) == 2:
+      inputfile = sys.argv[1]
+      with open(inputfile) as fp:
+        self.index = json.load(fp)
+        total = len(os.listdir('data/process'))
+        if len(self.index) == total:
+          self.stage = 1
+        else:
+          self.start_index = len(self.index)
+          self.cli.cli_print("resuming collection from %d of %d\n" % (self.start_index, total))
+    if self.stage == 0:
+      self.collect_loop(stdscr)
+      self.write_file("collection-complete")
+      self.stage = 1
+
+    self.cli.cli_print("Congratulations, data entry is complete, you will now have a chance to correct the data\n")
+    time.sleep(3)
+
+    self.correct_loop(stdscr)
 
 index_instance = Index()
 curses.wrapper(index_instance.main_loop)
