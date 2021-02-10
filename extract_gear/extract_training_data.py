@@ -9,8 +9,14 @@ Y_GEAR_OFFSET = 177
 X_LEVEL_OFFSET = 180
 Y_LEVEL_OFFSET = 268
 
+X_SET_OFFSET = 100
+Y_SET_OFFSET = -100
+
 LEVEL_WIDTH = 70
 LEVEL_HEIGHT = 30
+
+SET_WIDTH = 140
+SET_HEIGHT = 20
 
 LEVEL_ONE_STAT_ROW_OFFSET = 88
 
@@ -65,3 +71,12 @@ def make_level_img(img, index, x, y):
     cv2.destroyAllWindows()
     "If it's still wrong write some code to correct it yourself!"
   cv2.imwrite(dir + 'level/process/%d.png' % index, tmp_img)
+
+def make_set_img(img, index, x, y):
+  x_coord = X_START + (x-1) * X_GEAR_OFFSET + X_SET_OFFSET
+  y_coord = Y_START + (y-1) * Y_GEAR_OFFSET + Y_SET_OFFSET
+
+  tmp_img = img[y_coord:y_coord + SET_HEIGHT, x_coord:x_coord + SET_WIDTH]
+  cv2.waitKey(0)
+  cv2.destroyAllWindows()
+  cv2.imwrite(dir + 'set/process/%d.png' % index, tmp_img)

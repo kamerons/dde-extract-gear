@@ -21,8 +21,19 @@ def extract_level_data():
     make_level_img(img, num, int(file_name[0]), int(file_name[1]))
     num += 1
 
+def extract_set_data():
+  num = 0
+  files = sorted(os.listdir('data/preprocess/'))
+  for file_name in files:
+    img = cv2.imread('data/preprocess/' + file_name)
+    print("Processing " + file_name)
+    make_set_img(img, num, int(file_name[0]), int(file_name[1]))
+    num += 1
+
 flag = sys.argv[1]
 if sys.argv[1] == "stat":
   extract_stat_data()
 elif flag == "level":
   extract_level_data()
+elif flag == "set":
+  extract_set_data()

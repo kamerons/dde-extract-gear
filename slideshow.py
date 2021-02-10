@@ -1,11 +1,13 @@
-from preprocess import PreProcess
+from preprocess_stat import PreProcessStat
+from preprocess_level import PreProcessLevel
+from preprocess_set import PreProcessSet
 import pytesseract
 import cv2
 import os
 import random
 import numpy as np
 import json
-
+import sys
 
 dir = 'data/stat/'
 def confirm_color():
@@ -21,8 +23,8 @@ def confirm_color():
     if total % 100 == 0:
       print("Complete %d of at most %d" % (total, len(index)))
     img = cv2.imread(dir + 'process/' + data['file_name'])
-    preprocessor = PreProcess(img)
-    img = preprocessor.process()
+    preprocessor = PreProcessStat(img)
+    img = preprocessor.process_stat()
     guess = pytesseract.image_to_string(img).strip()
     guess = "".join(e for e in guess if e.isalnum())
     if guess != str(data['num']):
@@ -35,8 +37,8 @@ def confirm_color():
   print("showing failed images")
   for failure in failed:
     img = cv2.imread(dir + 'stat/process/' + failure['file_name'])
-    preprocessor = PreProcess(np.array(img, copy=True))
-    img2 = preprocessor.process()
+    preprocessor = PreProcessStat(np.array(img, copy=True))
+    img2 = preprocessor.process_stat()
     img3 = np.full((56,56*2, 3), (0, 0, 0), dtype=np.uint8)
 
     for x in range(56):
@@ -48,4 +50,28 @@ def confirm_color():
     cv2.waitKey(0)
     cv2.destroyAllWindows()
 
-confirm_color()
+def confirm_stat():
+  for file_name in os.listdir('data/level/process/'):
+    img = cv2.imread('data/level/process/' + file_name)
+    preprocessor = PreProcessLevel(img)
+    img = preprocessor.process_level()
+    guess = pytesseract.image_to_string(img).strip()
+    print("The guess for this file was: %s" % guess)
+    cv2.imshow('img', img)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+
+def confirm_set():
+  for file_name in os.listdir('data/set/process/'):
+    img = cv2.imread('data/set/process/' + file_name)
+    preprocessor = PreProcessSet(img)
+    img = preprocessor.process_set()
+    guess = pytesseract.image_to_string(img).strip()
+    print("The guess for this file was: %s" % guess)
+
+if sys.argv[1] == 'stat':
+  confirm_color()
+elif sys.argv[1] == 'level':
+  confirm_stat()
+else:
+  confirm_set()
