@@ -72,11 +72,15 @@ def make_level_img(img, index, x, y):
     "If it's still wrong write some code to correct it yourself!"
   cv2.imwrite(dir + 'level/process/%d.png' % index, tmp_img)
 
-def make_set_img(img, index, x, y):
+def get_set_img(img, y, x):
   x_coord = X_START + (x-1) * X_GEAR_OFFSET + X_SET_OFFSET
   y_coord = Y_START + (y-1) * Y_GEAR_OFFSET + Y_SET_OFFSET
 
-  tmp_img = img[y_coord:y_coord + SET_HEIGHT, x_coord:x_coord + SET_WIDTH]
+  return img[y_coord:y_coord + SET_HEIGHT, x_coord:x_coord + SET_WIDTH]
+
+
+def make_set_img(img, index, x, y):
+  tmp_img = get_set_img(img, y, x)
   cv2.waitKey(0)
   cv2.destroyAllWindows()
   cv2.imwrite(dir + 'set/process/%d.png' % index, tmp_img)
