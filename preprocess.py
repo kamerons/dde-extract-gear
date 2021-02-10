@@ -3,11 +3,11 @@ class PreProcess:
   PIXEL_VALUE_THRESHOLD = 3
   PIXEL_COLOR_THRESHOLD = 40
 
-  AREA_THRESHOLD = 20
+  AREA_THRESHOLD = 30
 
   LOW_X = 11
   LOW_Y = 31
-  HIGH_X = 49
+  HIGH_X = 51
   HIGH_Y = 55
 
   img = None

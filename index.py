@@ -18,6 +18,7 @@ import sys
 
 armor_types = ['electric', 'fire', 'poison', 'base', 'hero_dmg', 'hero_hp', 'hero_speed',
     'hero_rate', 'offense', 'defense', 'tower_dmg', 'tower_rate', 'tower_hp', 'tower_range', 'none']
+dir = 'data/stat/'
 class Index:
 
   img = []
@@ -89,23 +90,23 @@ class Index:
     return data
 
   def write_file(self, prefix=""):
-    with open("data/save/" + prefix + Index.get_time() + '-index.json', 'w') as fp:
+    with open(dir + "save/" + prefix + Index.get_time() + '-index.json', 'w') as fp:
       json.dump(self.index, fp)
 
   def save_progress(self, data):
     self.cli.cli_print("saving progress and exiting")
-    with open('data/save/progress.json', 'w') as fp:
+    with open(dir + 'save/progress.json', 'w') as fp:
       json.dump(data, fp)
       exit()
 
   def collect_loop(self, stdscr):
-    files = sorted(os.listdir('data/process/'))
+    files = sorted(os.listdir(dir + 'process/'))
     i = self.start_index
     self.start_index = 0
     while i <  len(files):
       file_name = files[i]
       data = {}
-      self.img = cv2.imread('data/process/' + file_name)
+      self.img = cv2.imread(dir + 'process/' + file_name)
       tmp = self.collect_data()
       if tmp == 'correct':
         i = i -1 if i - 1 >= 0 else 0
@@ -128,7 +129,7 @@ class Index:
     while i < len(self.index):
       correct = " "
       data = self.index[i]
-      self.img = cv2.imread('data/process/' + data['file_name'])
+      self.img = cv2.imread(dir + 'process/' + data['file_name'])
       while correct != "":
         type_thing = data['type']
         if type_thing in ['electric', 'hero_speed', 'tower_range']:
@@ -171,7 +172,7 @@ class Index:
       inputfile = sys.argv[1]
       with open(inputfile) as fp:
         self.index = json.load(fp)
-        total = len(os.listdir('data/process'))
+        total = len(os.listdir(dir + 'process/'))
         if len(self.index) == total:
           self.stage = 1
         else:

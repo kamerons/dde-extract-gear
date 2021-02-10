@@ -12,12 +12,12 @@ print("press enter when ready, you will have 10 seconds to prepare")
 
 unused = input()
 countdown(10, True)
-
+dir = 'data/'
 i = 0
 while True:
   for row in range(1, 4):
     for column in range(1, 6):
-      name = 'data/preprocess/%d%d_%03d.png' % (column, row, i)
+      name = dir + 'preprocess/%d%d_%03d.png' % (column, row, i)
       pyautogui.screenshot(name)
       print("Took screenshot: %s" % name)
       if row == 3 and column == 5:
