@@ -20,3 +20,7 @@ class ApiCv2:
 
   def destroyAllWindows(self):
     return cv2.destroyAllWindows()
+
+
+  def filter2D(self, img, ddepth, kernel):
+    return cv2.filter2D(img, ddepth, kernel)
