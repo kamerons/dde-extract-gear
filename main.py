@@ -1,57 +1,34 @@
-import pyautogui
-import cv2
-from extract_gear.screen import Screen
-from extract_gear.extract_training_data import *
-import numpy as np
-import tkinter
-from PIL import Image, ImageTk
+#!/usr/bin/env python3
+
+import argparse
+import sys
+
+from api.api_pyautogui import ApiPyAutoGui
+from gear_collect import GearCollecter
+from api.safe_pyautogui import SafePyAutoGui
 
 
+GEAR_COLLECT = "gearcollect"
 
-def run():
-  screen = Screen()
-  img = cv2.imread('../../Pictures/row1_column1.png')
-  x = Screen.START_X - 45
-  y = Screen.START_Y - 12
+command_options = [GEAR_COLLECT]
 
-  add_mark(img, x, y)
-  # for i in range(4):
-  #  add_mark(img, x + Screen.X_STAT_OFFSET * i, y)
-  # for i in range(4):
-  #  add_mark(img, x + Screen.X_STAT_OFFSET * i, y + Screen.Y_STAT_OFFSET)
-  # for i in range(4):
-  #  add_mark(img, x + Screen.X_STAT_OFFSET* i, y + 2*Screen.Y_STAT_OFFSET)
+parser = argparse.ArgumentParser(description='Delegate to corresponding commands')
+parser.add_argument('-s', '--safe', action='store_true', default=False,
+  help="Determines if the output of the command should write to disc")
+parser.add_argument('command', type=str, nargs=1,
+  help="The command to be delegated to. Valid options are %s" % str(command_options))
+parser.add_argument('-f', '--file', type=str, nargs=1,
+  help="The name of the file that should be passed to a different command")
 
-  cv2.imshow('img',img)
-  cv2.waitKey(0)
-  cv2.destroyAllWindows()
-
-
-def add_mark(img, x, y):
-  x_border = 56
-  y_border = 56
-  for x1 in range(x_border * 2 + 1):
-    x2 = x1 - x_border
-    for y1 in range(y_border * 2 + 1):
-      y2 = y1 - y_border
-      if y2 == 0 and x2 == 0:
-        img[round(y2 + y), round(x2 + x)] = [0, 0, 0]
-      else:
-        img[round(y2 + y), round(x2 + x)] = [255, 255, 255]
-
-def run2():
-  screen = Screen()
-  img = cv2.imread('../../Pictures/row2_column4.png')
-  sampled = screen.interpret_gear(img, 4, 2)
-  for sample in sampled:
-    add_mark(img, sample[0], sample[1])
-  #cv2.imshow('img',img)
-  #cv2.waitKey(0)
-  #cv2.destroyAllWindows()
-  cv2.imwrite('../../Pictures/sampled.png', img)
-
-def run3():
-  img = cv2.imread('../../Pictures/row1_column1.png')
-  make_img(img, 1, 1)
-
-run3()
+arg = parser.parse_args(sys.argv[1:])
+command = arg.command[0]
+if command == GEAR_COLLECT:
+  if arg.safe:
+    print("Starting screenshot collection in safe mode.")
+    api_pyautogui = SafePyAutoGui()
+  else:
+    print("Starting screenshot collection")
+    api_pyautogui = ApiPyAutoGui()
+  input("Press enter to confirm")
+  gear_collector = GearCollecter(api_pyautogui=api_pyautogui)
+  gear_collector.run()
