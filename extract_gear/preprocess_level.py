@@ -1,6 +1,6 @@
-from preprocess import PreProcessor
+from extract_gear.preprocess import PreProcessor
 
-class PreProcessSet(PreProcessor):
+class PreProcessLevel(PreProcessor):
 
   LOW_X = 11
   LOW_Y = 31
@@ -14,11 +14,11 @@ class PreProcessSet(PreProcessor):
     self.y_size = img.shape[0]
 
 
-  def process_set(self):
+  def process_level(self):
     for y in range(self.y_size):
       for x in range(self.x_size):
         pixel = self.img[y,x]
-        if self.is_white(pixel):
+        if self.is_cyan(pixel):
           self.img[y,x] = [0, 0, 0]
         else:
           self.img[y,x] = [255, 255, 255]

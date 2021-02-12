@@ -1,8 +1,8 @@
 from fuzzywuzzy import fuzz
 import pytesseract
 
-from extract_image import ExtractImage
-from preprocess_set import PreProcessSet
+from extract_gear.extract_image import ExtractImage
+from extract_gear.preprocess_set import PreProcessSet
 
 class ExtractRealData:
 

@@ -5,8 +5,8 @@ import sys
 import pytesseract
 
 from api.api_cv2 import ApiCv2
-from extract_image import ExtractImage
-from extract_real_data import ExtractRealData
+from extract_gear.extract_image import ExtractImage
+from extract_gear.extract_real_data import ExtractRealData
 
 class Extract:
 

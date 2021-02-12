@@ -8,10 +8,10 @@ from api.safe_cv2 import SafeCv2
 from api.safe_json import SafeJson
 from api.safe_pyautogui import SafePyAutoGui
 
-from extract import Extract
-from gear_collect import GearCollecter
-from index import Index
-from slideshow import SlideShow
+from extract_gear.extract import Extract
+from extract_gear.gear_collect import GearCollecter
+from extract_gear.index import Index
+from extract_gear.slideshow import SlideShow
 
 GEAR_COLLECT = "gearcollect"
 SLIDESHOW = "slideshow"

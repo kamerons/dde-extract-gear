@@ -6,7 +6,7 @@ from api.api_curses import ApiCurses
 from api.api_cv2 import ApiCv2
 from api.api_json import ApiJson
 from api.api_time import ApiTime
-from cli import Cli
+from extract_gear.cli import Cli
 
 # Creates an index file of the form:
 # [
@@ -85,8 +85,6 @@ class Index:
         self.write_file("autosave-")
       elif self.idx % 10 == 0:
         self.cli.print("\nComplete %d of %d\n" % (self.idx, len(files)), Cli.BLUE)
-      if self.idx >12:
-        break
 
     self.idx = 0
 

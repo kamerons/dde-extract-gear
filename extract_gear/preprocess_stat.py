@@ -1,4 +1,4 @@
-from preprocess import PreProcessor
+from extract_gear.preprocess import PreProcessor
 
 class PreProcessStat(PreProcessor):
 

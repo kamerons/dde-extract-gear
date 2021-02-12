@@ -13,7 +13,7 @@ class SafeBuiltIn(ApiBuiltIn):
 # open the file
 class EmptyContextManger:
   def __enter__(self):
-    pass
+    return self
 
   def __exit__(self, a, b, c):
     pass

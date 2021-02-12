@@ -5,9 +5,9 @@ import pytesseract
 import sys
 
 from api.api_cv2 import ApiCv2
-from preprocess_stat import PreProcessStat
-from preprocess_level import PreProcessLevel
-from preprocess_set import PreProcessSet
+from extract_gear.preprocess_stat import PreProcessStat
+from extract_gear.preprocess_level import PreProcessLevel
+from extract_gear.preprocess_set import PreProcessSet
 
 class SlideShow:
 
