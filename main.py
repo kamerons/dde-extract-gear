@@ -3,15 +3,20 @@
 import argparse
 import sys
 
+from api.safe_builtin import SafeBuiltIn
 from api.safe_cv2 import SafeCv2
+from api.safe_json import SafeJson
 from api.safe_pyautogui import SafePyAutoGui
+
 from extract import Extract
 from gear_collect import GearCollecter
+from index import Index
 from slideshow import SlideShow
 
 GEAR_COLLECT = "gearcollect"
 SLIDESHOW = "slideshow"
 EXTRACT = "extract"
+INDEX = "index"
 
 command_options = [GEAR_COLLECT, SLIDESHOW, EXTRACT]
 
@@ -54,3 +59,14 @@ elif command == EXTRACT:
     input("Press enter to confirm")
     extract = Extract()
   extract.run(arg.command[1])
+
+elif command == INDEX:
+  if arg.safe:
+    print("Starting index creation in safe mode.")
+    input("Press enter to confirm")
+    index = Index(arg.file, api_builtin=SafeBuiltIn(), api_cv2=SafeCv2(), api_json=SafeJson())
+  else:
+    print("Starting index.  This operation will change data on the disc.  This operation may overwrite index.json")
+    input("Press enter to confirm")
+    index = Index(arg.file)
+  index.run_index_creation()

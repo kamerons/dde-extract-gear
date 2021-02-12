@@ -1,86 +1,72 @@
-import select
-import sys
-import curses
-import time
-
-red = 203
-blue = 70
-green = 120
-brown = 179
+from api.api_curses import ApiCurses
 
 class Cli:
-  _options = []
-  _buffer = ""
-  _stdscr = None
 
-  def __init__(self, stdscr, options):
-    self._options = options
-    self._buffer = ""
-    self._stdscr = stdscr
-    self._stdscr.scrollok(True)
-    curses.use_default_colors()
-    curses.start_color()
-    for i in range(0, curses.COLORS):
-      curses.init_pair(i + 1, i, -1)
+  RED = 203
+  BLUE = 70
+  GREEN = 120
+  BROWN = 179
 
-  def cli_print(self, msg, color="NONE"):
-    if color == "NONE":
-      self.safe_addstr(msg)
+
+  def __init__(self, stdscr, options, api_curses=None):
+    self.api_curses = api_curses if api_curses else ApiCurses()
+    self.options = options
+    self.buffer = ""
+    self.stdscr = stdscr
+    self.stdscr.scrollok(True)
+
+
+  def print(self, msg, color=None):
+    if color == None:
+      self.stdscr.addstr(msg)
     else:
-      self.safe_addstr(msg, color)
-    self._stdscr.refresh()
+      self.stdscr.addstr(msg, self.api_curses.color_pair(color))
+    self.stdscr.refresh()
 
-  def cli_input(self, prompt):
-    self._buffer = ""
+
+  def input(self, prompt):
+    self.buffer = ""
     ch = ''
-    self.safe_addstr(prompt)
+    self.stdscr.addstr(prompt)
     while True:
-      curses.flushinp()
-      int_char = self._stdscr.getch()
+      self.api_curses.flushinp()
+      int_char = self.stdscr.getch()
       ch = chr(int_char)
       if ch == '\t':
         self.complete()
       #263 is for tmux users
       elif (ord(ch) == 263 or ord == '\b'):
-        if len(self._buffer) > 0:
+        if len(self.buffer) > 0:
           self.backspace()
       elif ch == '\n':
-        self.safe_addstr(ch)
-        return self._buffer
+        self.stdscr.addstr(ch)
+        return self.buffer
       else:
-        self._buffer += ch
-        self.safe_addstr(ch)
-    return self._buffer
+        self.buffer += ch
+        self.stdscr.addstr(ch)
+    return self.buffer
+
 
   def backspace(self):
-    self.safe_addstr("\b \b")
-    self._buffer = self._buffer[:len(self._buffer)-1]
+    self.stdscr.addstr("\b \b")
+    self.buffer = self.buffer[:len(self.buffer)-1]
+
 
   def complete(self):
     valid_completions = [
-          option for option in self._options
-          if option.startswith(self._buffer)
-        ]
+        option for option in self.options
+        if option.startswith(self.buffer)
+      ]
     if len(valid_completions) == 0:
       return
     elif len(valid_completions) == 1:
       stop_point = len(valid_completions[0])
     else:
-      stop_point = len(self._buffer)
+      stop_point = len(self.buffer)
       for i in range(stop_point, len(valid_completions[0])):
         if valid_completions[0][i] != valid_completions[1][i]:
           stop_point = i
           break
-    completion_left = valid_completions[0][len(self._buffer):stop_point]
-    self._buffer += completion_left
-    self.safe_addstr(completion_left)
-
-  def safe_addstr(self, message, color=None):
-    if color is None:
-      self._stdscr.addstr(message)
-    else:
-      self._stdscr.addstr(message, curses.color_pair(color))
-
-
-
-
+    completion_left = valid_completions[0][len(self.buffer):stop_point]
+    self.buffer += completion_left
+    self.stdscr.addstr(completion_left)
