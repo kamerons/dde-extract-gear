@@ -4,16 +4,16 @@ class PreProcessStat(PreProcessor):
 
   AREA_THRESHOLD = 30
 
-  LOW_X = 11
   LOW_Y = 31
-  HIGH_X = 51
+  LOW_X = 11
   HIGH_Y = 55
+  HIGH_X = 51
 
 
   def __init__(self, img):
     self.img = img
-    self.x_size = img.shape[1]
     self.y_size = img.shape[0]
+    self.x_size = img.shape[1]
 
 
   def process_stat(self):
@@ -60,8 +60,8 @@ class PreProcessStat(PreProcessor):
   # Remove small leftovers pixels that have a small area. Numbers will never have a small area
   def trim_splotches(self):
     visited = []
-    for x in range(PreProcessStat.LOW_X, PreProcessStat.HIGH_X):
-      for y in range(PreProcessStat.LOW_Y, PreProcessStat.HIGH_Y):
+    for y in range(PreProcessStat.LOW_Y, PreProcessStat.HIGH_Y):
+      for x in range(PreProcessStat.LOW_X, PreProcessStat.HIGH_X):
         if [y, x] in visited:
           continue
         if self.is_black(self.img[y, x]):
@@ -95,7 +95,10 @@ class PreProcessStat(PreProcessor):
     for coord in self.add_neighbors(y1, x1, visited=visited):
       toVisit.append(coord)
     while toVisit != []:
-      y1, x1 = toVisit.pop()
+      coord = toVisit.pop()
+      if coord in visited:
+        continue
+      y1, x1 = coord
       visited.append([y1, x1])
       aSize += 1
       for coord in self.add_neighbors(y1, x1, visited=visited):

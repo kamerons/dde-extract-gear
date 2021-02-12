@@ -2,7 +2,6 @@ import numpy as np
 
 class PreProcessor:
 
-  NUM_PIXEL_THRESHOLD = 60
   PIXEL_VALUE_THRESHOLD = 3
   PIXEL_COLOR_THRESHOLD = 40
 
@@ -10,7 +9,7 @@ class PreProcessor:
   WHITE_VALUE_THRESHOLD = 180
 
 
-  def __init__(self, img):
+  def __init__(self):
     pass
 
 

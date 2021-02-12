@@ -2,12 +2,6 @@ from extract_gear.preprocess import PreProcessor
 
 class PreProcessSet(PreProcessor):
 
-  LOW_X = 11
-  LOW_Y = 31
-  HIGH_X = 51
-  HIGH_Y = 55
-
-
   def __init__(self, img):
     self.img = img
     self.x_size = img.shape[1]
