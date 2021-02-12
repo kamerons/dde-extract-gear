@@ -3,6 +3,11 @@
 import argparse
 import sys
 
+from api.api_builtin import ApiBuiltIn
+from api.api_cv2 import ApiCv2
+from api.api_json import ApiJson
+from api.api_pyautogui import ApiPyAutoGui
+
 from api.safe_builtin import SafeBuiltIn
 from api.safe_cv2 import SafeCv2
 from api.safe_json import SafeJson
@@ -33,10 +38,10 @@ command = arg.command[0]
 if command == GEAR_COLLECT:
   if arg.safe:
     print("Starting screenshot collection in safe mode.")
-    gear_collector = GearCollecter(api_pyautogui=SafePyAutoGui())
+    gear_collector = GearCollecter(SafeBuiltIn(), SafePyAutoGui())
   else:
     print("Starting screenshot collection.  This operation will change data on the disc")
-    gear_collector = GearCollecter()
+    gear_collector = GearCollecter(ApiBuiltIn(), ApiPyAutoGui())
     input("Press enter to confirm")
   gear_collector.run()
 
