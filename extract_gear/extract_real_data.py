@@ -1,6 +1,5 @@
-from fuzzywuzzy import fuzz
-import pytesseract
-
+from api.api_fuzzywuzzy import ApiFuzzyWuzzy
+from api.api_pytesseract import ApiPyTesseract
 from extract_gear.extract_image import ExtractImage
 from extract_gear.preprocess_set import PreProcessSet
 
@@ -12,8 +11,10 @@ class ExtractRealData:
   MIN_LEVENSHTEIN = 65
 
 
-  def __init__(self):
-    pass
+  def __init__(self, extract_image, api_fuzzzywuzzy=None, api_pytesseract=None):
+    self.api_fuzzzywuzzy = api_fuzzzywuzzy if api_fuzzzywuzzy else ApiFuzzyWuzzy()
+    self.api_pytesseract = api_pytesseract if api_pytesseract else ApiPyTesseract()
+    self.extract_image = extract_image
 
 
   def get_armor_type(self, img, y, x):
@@ -21,7 +22,7 @@ class ExtractRealData:
     highest = 0
     highest_type = ""
     for armor_type in ExtractRealData.ARMOR_TYPES:
-      ratio = fuzz.ratio(armor_type.lower(), guess.lower())
+      ratio = self.api_fuzzzywuzzy.ratio(armor_type.lower(), guess.lower())
       if ratio > highest:
         highest_type = armor_type
         highest = ratio
@@ -31,9 +32,8 @@ class ExtractRealData:
 
 
   def get_armor_type_guess(self, img, y, x):
-    extract_image = ExtractImage()
-    img = extract_image.extract_set_image(img, y, x)
+    img = self.extract_image.extract_set_image(img, y, x)
     set_processor = PreProcessSet(img)
     processed_img = set_processor.process_set()
-    guess = pytesseract.image_to_string(processed_img).strip()
+    guess = self.api_pytesseract.image_to_string(processed_img).strip()
     return guess

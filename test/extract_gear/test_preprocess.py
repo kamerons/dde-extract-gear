@@ -3,22 +3,18 @@ import unittest
 
 from extract_gear.preprocess import PreProcessor
 
+from test.util.test_util import TestUtil
+
 class TestPreProcess(unittest.TestCase):
 
   @classmethod
   def setUpClass(cls):
-    TestPreProcess.ORIGINAL_PIXEL_VALUE_THRESHOLD = PreProcessor.PIXEL_VALUE_THRESHOLD
-    TestPreProcess.ORIGINAL_PIXEL_COLOR_THRESHOLD = PreProcessor.PIXEL_COLOR_THRESHOLD
-    TestPreProcess.ORIGINAL_CYAN_RED_THRESHOLD = PreProcessor.CYAN_RED_DIFF_THRESHOLD
-    TestPreProcess.ORIGINAL_WHITE_VALUE_THRESHOLD = PreProcessor.WHITE_VALUE_THRESHOLD
+    TestPreProcess.ORIGINAL_PREPROCESSOR_ATTRIBUTES = TestUtil.get_class_attributes(PreProcessor)
 
 
   @classmethod
   def tearDownClass(cls):
-    PreProcessor.PIXEL_VALUE_THRESHOLD = TestPreProcess.ORIGINAL_PIXEL_VALUE_THRESHOLD
-    PreProcessor.PIXEL_COLOR_THRESHOLD = TestPreProcess.ORIGINAL_PIXEL_COLOR_THRESHOLD
-    PreProcessor.CYAN_RED_DIFF_THRESHOLD = TestPreProcess.ORIGINAL_CYAN_RED_THRESHOLD
-    PreProcessor.WHITE_VALUE_THRESHOLD = TestPreProcess.ORIGINAL_WHITE_VALUE_THRESHOLD
+    TestUtil.restore_class_attributes(PreProcessor, TestPreProcess.ORIGINAL_PREPROCESSOR_ATTRIBUTES)
 
 
   def test_isRed(self):

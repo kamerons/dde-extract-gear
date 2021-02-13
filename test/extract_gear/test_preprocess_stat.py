@@ -4,6 +4,8 @@ import unittest
 
 from extract_gear.preprocess_stat import PreProcessStat
 
+from test.util.test_util import TestUtil
+
 class TestPreProcessSet(unittest.TestCase):
 
   RED = [0, 0, 255]
@@ -15,20 +17,12 @@ class TestPreProcessSet(unittest.TestCase):
 
   @classmethod
   def setUpClass(cls):
-    TestPreProcessSet.ORIGINAL_AREA_THRESHOLD = PreProcessStat.AREA_THRESHOLD
-    TestPreProcessSet.ORIGINAL_LOW_Y = PreProcessStat.LOW_Y
-    TestPreProcessSet.ORIGINAL_LOW_X = PreProcessStat.LOW_X
-    TestPreProcessSet.ORIGINAL_HIGH_Y = PreProcessStat.HIGH_X
-    TestPreProcessSet.ORIGINAL_HIGH_X = PreProcessStat.HIGH_Y
+    TestPreProcessSet.ORIGINAL_PREPROCESSSTAT_ATTRIBUTES = TestUtil.get_class_attributes(PreProcessStat)
 
 
   @classmethod
   def tearDownClass(cls):
-    PreProcessStat.AREA_THRESHOLD = TestPreProcessSet.ORIGINAL_AREA_THRESHOLD
-    PreProcessStat.LOW_Y = TestPreProcessSet.ORIGINAL_LOW_Y
-    PreProcessStat.LOW_X = TestPreProcessSet.ORIGINAL_LOW_X
-    PreProcessStat.HIGH_Y = TestPreProcessSet.ORIGINAL_HIGH_Y
-    PreProcessStat.HIGH_X = TestPreProcessSet.ORIGINAL_HIGH_X
+    TestUtil.restore_class_attributes(PreProcessStat, TestPreProcessSet.ORIGINAL_PREPROCESSSTAT_ATTRIBUTES)
 
 
   def test_increaseContrast_colorsInBoundsPreserved(self):
