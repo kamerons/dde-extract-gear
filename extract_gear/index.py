@@ -22,6 +22,9 @@ class Index:
   STAT_OPTIONS = ['electric', 'fire', 'poison', 'base', 'hero_dmg', 'hero_hp', 'hero_speed',
     'hero_rate', 'offense', 'defense', 'tower_dmg', 'tower_rate', 'tower_hp', 'tower_range', 'none']
 
+  TYPE_KEY = "type"
+  FILE_KEY = "file_name"
+  VALUE_KEY = "num"
 
   def __init__(self, file, api_builtin=None, api_curses=None, api_cv2=None, api_json=None, api_time=None):
     self.api_builtin = api_builtin if api_builtin else ApiBuiltIn()

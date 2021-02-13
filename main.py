@@ -14,16 +14,21 @@ from api.safe_json import SafeJson
 from api.safe_pyautogui import SafePyAutoGui
 
 from extract_gear.extract import Extract
+from extract_gear.extract_image import ExtractImage
 from extract_gear.gear_collect import GearCollecter
 from extract_gear.index import Index
 from extract_gear.slideshow import SlideShow
+
+from folder.folder import Folder
+
 
 GEAR_COLLECT = "gearcollect"
 SLIDESHOW = "slideshow"
 EXTRACT = "extract"
 INDEX = "index"
+TRAIN = "train"
 
-command_options = [GEAR_COLLECT, SLIDESHOW, EXTRACT]
+command_options = [GEAR_COLLECT, SLIDESHOW, EXTRACT, TRAIN]
 
 parser = argparse.ArgumentParser(description='Delegate to corresponding commands')
 parser.add_argument('-s', '--safe', action='store_true', default=False,
@@ -75,3 +80,16 @@ elif command == INDEX:
     input("Press enter to confirm")
     index = Index(arg.file)
   index.run_index_creation()
+
+elif command == TRAIN:
+  if arg.safe:
+    print("Starting training in safe mode.  Nothing will be written to disc")
+  else:
+    print("Starting training.  Saved model will be overwritten")
+  input("Press enter to confirm")
+
+  #put down here to save on startup time
+  from train.train_stat_type import TrainStatType
+
+  train_stat_type = TrainStatType(arg.safe)
+  train_stat_type.train()

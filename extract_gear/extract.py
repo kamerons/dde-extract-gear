@@ -6,7 +6,6 @@ import pytesseract
 
 from api.api_cv2 import ApiCv2
 from extract_gear.extract_image import ExtractImage
-from extract_gear.extract_real_data import ExtractRealData
 
 class Extract:
 
@@ -22,7 +21,11 @@ class Extract:
     elif method == 'set':
       self.run_extract_set_data()
     else:
-      self.run_get_least_confident_armor_type()
+      # Delay expensive tensorflow import until necessary
+      from extract_gear.extract_real_data import ExtractRealData
+
+      extract_real_data = ExtractRealData()
+      extract_real_data.run()
 
 
   def run_extract_stat_data(self):
@@ -104,42 +107,3 @@ class Extract:
       self.api_cv2.destroyAllWindows()
       self.api_cv2.imwrite('data/set/process/%03d.png' % num, img)
       num += 1
-
-
-  def run_get_least_confident_armor_type(self):
-    files = sorted(os.listdir('data/preprocess'))
-    smallest_diff = 100
-    smallest_diff_file_name = ""
-    extract_real_data = ExtractRealData()
-    for file_name in files:
-      img = self.api_cv2.imread('data/preprocess/' + file_name)
-      guess = extract_real_data.get_armor_type_guess(img, int(file_name[1]), int(file_name[0]))
-      highest = 0
-      second_highest = -1
-      for armor_type in ExtractRealData.ARMOR_TYPES:
-        ratio = fuzz.ratio(armor_type.lower(), guess.lower())
-        if ratio > highest:
-          second_highest = highest
-          highest = ratio
-        elif ratio > second_highest:
-          second_highest = ratio
-      confidence = highest - second_highest
-      if confidence < smallest_diff:
-        smallest_diff = confidence
-        smallest_diff_file_name = file_name
-      for armor_type in ExtractRealData.ARMOR_TYPES:
-        ratio = fuzz.ratio(armor_type.lower(), guess.lower())
-
-    img = self.api_cv2.imread('data/preprocess/' + smallest_diff_file_name)
-    guess = extract_real_data.get_armor_type_guess(img, int(smallest_diff_file_name[1]), int(smallest_diff_file_name[0]))
-    print("The guess was %s" % guess)
-    highest = 0
-    second_highest = -1
-    for armor_type in ExtractRealData.ARMOR_TYPES:
-      ratio = fuzz.ratio(armor_type.lower(), guess.lower())
-      if ratio > highest:
-        second_highest = highest
-        highest = ratio
-      elif ratio > second_highest:
-        second_highest = ratio
-    print("the confidence was %d" % (highest - second_highest))

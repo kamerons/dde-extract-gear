@@ -24,3 +24,8 @@ class ApiCv2:
 
   def filter2D(self, img, ddepth, kernel):
     return cv2.filter2D(img, ddepth, kernel)
+
+  def show_img(self, img, window_name="img", waitKey=0):
+    cv2.imshow(window_name, img)
+    cv2.waitKey(waitKey)
+    cv2.destroyAllWindows()
