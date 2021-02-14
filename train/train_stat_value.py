@@ -21,7 +21,7 @@ from api.safe_json import SafeJson
 from api.api_random import ApiRandom
 
 from extract_gear.index import Index
-from extract_gear.image_splitter import ImageSplitter
+from extract_gear.image_splitter import ImageSplitter, STAT_DATA
 from extract_gear.preprocess_stat import PreProcessStat
 from folder.folder import Folder
 
@@ -81,7 +81,7 @@ class TrainStatValue:
       y.append(label)
 
     x = np.array(x) / 255
-    x.reshape(-1, ImageSplitter.STAT_SIZE, ImageSplitter.STAT_SIZE, 1)
+    x.reshape(-1, STAT_DATA.size[0], STAT_DATA.size[1], 1)
     y = np.array(y)
     return (x, y)
 
@@ -89,7 +89,7 @@ class TrainStatValue:
   def get_model(self):
     model = Sequential()
     model.add(Conv2D(32,3,padding="same", activation="relu",
-      input_shape=(ImageSplitter.STAT_SIZE,ImageSplitter.STAT_SIZE,3)))
+      input_shape=(STAT_DATA.size[0], STAT_DATA.size[1], 3)))
     model.add(MaxPool2D())
 
     model.add(Conv2D(32, 3, padding="same", activation="relu"))

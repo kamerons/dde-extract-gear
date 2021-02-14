@@ -11,9 +11,10 @@ class PreProcessLevel(PreProcessor):
   def process_level(self):
     for y in range(self.y_size):
       for x in range(self.x_size):
-        pixel = self.img[y,x]
+        coord = (y,x)
+        pixel = self.img[coord]
         if self.is_cyan(pixel):
-          self.img[y,x] = [0, 0, 0]
+          self.img[coord] = [0, 0, 0]
         else:
-          self.img[y,x] = [255, 255, 255]
+          self.img[coord] = [255, 255, 255]
     return self.img

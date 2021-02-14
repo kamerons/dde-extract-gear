@@ -18,7 +18,7 @@ from api.api_fuzzywuzzy import ApiFuzzyWuzzy
 from api.api_pytesseract import ApiPyTesseract
 from api.safe_cv2 import SafeCv2
 
-from extract_gear.extract_image import ExtractImage
+from extract_gear.image_splitter import ImageSplitter
 from extract_gear.preprocess_set import PreProcessSet
 from extract_gear.preprocess_stat import PreProcessStat
 from extract_gear.index import Index
@@ -35,11 +35,11 @@ class CardReader:
   MIN_LEVENSHTEIN = 65
 
 
-  def __init__(self, extract_image=None, api_cv2=None, api_fuzzzywuzzy=None, api_pytesseract=None):
+  def __init__(self, image_splitter=None, api_cv2=None, api_fuzzzywuzzy=None, api_pytesseract=None):
     self.api_cv2 = api_cv2 if api_cv2 else SafeCv2()
     self.api_fuzzzywuzzy = api_fuzzzywuzzy if api_fuzzzywuzzy else ApiFuzzyWuzzy()
     self.api_pytesseract = api_pytesseract if api_pytesseract else ApiPyTesseract()
-    self.extract_image = extract_image if extract_image else ExtractImage()
+    self.image_splitter = image_splitter if image_splitter else ImageSplitter()
     self.stat_type_model = tensorflow.keras.models.load_model(Folder.STAT_TYPE_MODEL_FOLDER)
     self.stat_value_model = tensorflow.keras.models.load_model(Folder.STAT_VALUE_MODEL_FOLDER)
 
@@ -50,7 +50,7 @@ class CardReader:
       print("File name: %s" % file_name)
       coord = int(file_name[1]), int(file_name[0])
       img = self.api_cv2.imread(Folder.PREPROCESS_FOLDER + file_name)
-      card = self.extract_image.extract_stat_card(img, coord)
+      card = self.image_splitter.extract_stat_card(img, coord)
       copy = np.full(card.shape, (0,0,0), dtype=np.uint8)
       for y in range(card.shape[0]):
         for x in range(copy.shape[1]):
@@ -86,7 +86,7 @@ class CardReader:
 
 
   def get_armor_type_guess(self, img, coord):
-    img = self.extract_image.extract_set_image(img, coord[0], coord[1])
+    img = self.image_splitter.extract_set_image(img, coord)
     set_processor = PreProcessSet(img)
     processed_img = set_processor.process_set()
     guess = self.api_pytesseract.image_to_string(processed_img).strip()
@@ -94,7 +94,7 @@ class CardReader:
 
 
   def get_stat_types(self, img, coord):
-    images = self.extract_image.extract_stat_images(img, coord[0], coord[1])
+    images = self.image_splitter.extract_stat_images(img, coord)
     processed_images = self.preprocess_for_stat_type(images)
     predictions = self.stat_type_model.predict_classes(processed_images, batch_size=10, verbose=0)
     stats = {}
@@ -132,5 +132,5 @@ class CardReader:
     for feature in data:
       x.append(feature)
     x = np.array(x) / 255
-    x.reshape(-1, ExtractImage.STAT_SIZE, ExtractImage.STAT_SIZE, 1)
+    x.reshape(-1, ImageSplitter.STAT_DATA.size[0], ImageSplitter.STAT_DATA.size[1], 1)
     return x

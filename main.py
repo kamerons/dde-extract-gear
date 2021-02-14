@@ -35,6 +35,8 @@ command_options = [GEAR_COLLECT, MODEL_EVALUATION, SPLIT, TRAIN, REAL]
 parser = argparse.ArgumentParser(description='Delegate to corresponding commands')
 parser.add_argument('-s', '--safe', action='store_true', default=False,
   help="Determines if the output of the command should write to disc")
+parser.add_argument('-q', '--quiet', action='store_true', default=False,
+  help="If on, images will not be displayed to the user")
 parser.add_argument('-f', '--file', type=str, nargs=1,
   help="The name of the file that should be passed to a different command")
 parser.add_argument('command', type=str, nargs='+',
@@ -55,19 +57,19 @@ if command == GEAR_COLLECT:
 elif command == MODEL_EVALUATION:
   if arg.safe:
     print("Starting model evaluation in safe mode.")
-    model_evaluator = ModelEvaluator()
   else:
-    print("Starting slideshow.")
-    model_evaluator = ModelEvaluator()
+    print("Model evaluation can only be run in safe mode.  Starting...")
+  model_evaluator = ModelEvaluator(api_cv2=SafeCv2(arg.quiet))
   model_evaluator.run(arg.command[1])
 
 elif command == SPLIT:
   if arg.safe:
     print("Starting data extraction in safe mode.")
-    image_split_collector = ImageSplitCollector(SafeCv2())
+    image_split_collector = ImageSplitCollector(SafeCv2(arg.quiet))
   else:
     print("""Starting data extraction.  This operation will change data on the disc.  This operation may overwite indexed
     data Making such data invalid""")
+    print("Model splitting cannot be run in quiet mode")
     input("Press enter to confirm")
     image_split_collector = ImageSplitCollector()
   image_split_collector.run(arg.command[1])
@@ -80,7 +82,7 @@ elif command == INDEX:
   else:
     print("Starting index.  This operation will change data on the disc.  This operation may overwrite index.json")
     input("Press enter to confirm")
-    index = Index(arg.file, api_builtin=ApiBuiltIn(), api_json=ApiJson())
+    index = Index(arg.file, api_builtin=ApiBuiltIn(), api_cv2=ApiCv2() ,api_json=ApiJson())
   index.run_index_creation()
 
 elif command == TRAIN:
@@ -109,6 +111,6 @@ elif command == REAL:
   #put down here to save on startup time
   input("Beginning extraction of real data.  Press enter to confirm")
   from extract_gear.extract_gear import ExtractGear
-  extract_gear = ExtractGear(ApiBuiltIn(), api_cv2=ApiCv2(), api_pyautogui=ApiPyAutoGui(),
+  extract_gear = ExtractGear(ApiBuiltIn(), api_cv2=ApiCv2(arg.quiet), api_pyautogui=ApiPyAutoGui(),
     api_json=ApiJson(), api_time=ApiTime())
   extract_gear.run()

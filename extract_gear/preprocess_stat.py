@@ -33,18 +33,19 @@ class PreProcessStat(PreProcessor):
           or not x in range(PreProcessStat.LOW_X, PreProcessStat.HIGH_X)):
           self.img[y,x] = [255, 255, 255]
           continue
-        pixel = self.img[y,x]
+        coord = (y,x)
+        pixel = self.img[coord]
         if self.is_red(pixel):
-          self.img[y,x] = [0, 0, 0]
+          self.img[coord] = [0, 0, 0]
         elif self.is_green(pixel):
-          self.img[y,x] = [0, 0, 0]
+          self.img[coord] = [0, 0, 0]
         elif self.is_gray(pixel):
-          self.img[y,x] = [0, 0, 0]
+          self.img[coord] = [0, 0, 0]
         else:
-          self.img[y,x] = [255, 255, 255]
+          self.img[coord] = [255, 255, 255]
 
 
-  def copy_digits(self, coordinates):
+  def copy_digit(self, coordinates):
     min_y = PreProcessStat.HIGH_Y
     min_x = PreProcessStat.HIGH_X
     for coordinate in coordinates:
@@ -66,15 +67,15 @@ class PreProcessStat(PreProcessor):
   def trim_edges(self):
     for y in range(PreProcessStat.LOW_Y, PreProcessStat.HIGH_Y):
       if self.is_black(self.img[y, PreProcessStat.LOW_X]):
-        self.remove_area(y, PreProcessStat.LOW_X)
-      if self.is_black(self.img[y, PreProcessStat.HIGH_X - 1]):
-        self.remove_area(y, PreProcessStat.HIGH_X - 1)
+        self.remove_area((y, PreProcessStat.LOW_X))
+      if self.is_black(self.img[y, PreProcessStat.HIGH_X-1]):
+        self.remove_area((y, PreProcessStat.HIGH_X-1))
 
     for x in range(PreProcessStat.LOW_X, PreProcessStat.HIGH_X):
       if self.is_black(self.img[PreProcessStat.LOW_Y, x]):
-        self.remove_area(PreProcessStat.LOW_Y, x)
-      if self.is_black(self.img[PreProcessStat.HIGH_Y - 1, x]):
-        self.remove_area(PreProcessStat.HIGH_Y - 1, x)
+        self.remove_area((PreProcessStat.LOW_Y, x))
+      if self.is_black(self.img[PreProcessStat.HIGH_Y-1, x]):
+        self.remove_area((PreProcessStat.HIGH_Y-1, x))
 
 
   # Remove small leftovers pixels that have a small area. Numbers will never have a small area
@@ -83,60 +84,57 @@ class PreProcessStat(PreProcessor):
     # this order ensures we encounter the leftmost digits first
     for x in range(PreProcessStat.LOW_X, PreProcessStat.HIGH_X):
       for y in range(PreProcessStat.LOW_Y, PreProcessStat.HIGH_Y):
-        if [y, x] in visited:
+        coord = (y,x)
+        if coord in visited:
           continue
-        if self.is_black(self.img[y, x]):
-          aSize, aVisited = self.size_area(y, x)
+        if self.is_black(self.img[coord]):
+          aSize, aVisited = self.size_area(coord)
           if aSize < PreProcessStat.AREA_THRESHOLD:
-            self.remove_area(y, x)
+            self.remove_area(coord)
           else:
-            self.copy_digits(aVisited)
-          for coord in aVisited:
-            visited.append(coord)
+            self.copy_digit(aVisited)
+          for visited_coord in aVisited:
+            visited.append(visited_coord)
 
 
-  def remove_area(self, y, x):
+  def remove_area(self, start_coord):
     toVisit = []
-    y1 = y
-    x1 = x
-    self.img[y1, x1] = [255, 255, 255]
-    for coord in self.add_neighbors(y1, x1):
+    self.img[start_coord] = [255, 255, 255]
+    for coord in self.add_neighbors(start_coord):
       toVisit.append(coord)
     while toVisit != []:
-      y1, x1 = toVisit.pop()
-      self.img[y1,x1] = [255, 255, 255]
-      for coord in self.add_neighbors(y1, x1):
+      cur_coord = toVisit.pop()
+      self.img[coord] = [255, 255, 255]
+      for coord in self.add_neighbors(cur_coord):
         toVisit.append(coord)
 
 
-  def size_area(self, y, x):
-    visited = [[y,x]]
+  def size_area(self, coord):
+    visited = [coord]
     toVisit = []
-    y1 = y
-    x1 = x
     aSize = 1
-    for coord in self.add_neighbors(y1, x1, visited=visited):
+    for coord in self.add_neighbors(coord, visited=visited):
       toVisit.append(coord)
     while toVisit != []:
       coord = toVisit.pop()
       if coord in visited:
         continue
-      y1, x1 = coord
-      visited.append([y1, x1])
+      visited.append(coord)
       aSize += 1
-      for coord in self.add_neighbors(y1, x1, visited=visited):
+      for coord in self.add_neighbors(coord, visited=visited):
         toVisit.append(coord)
     return aSize, visited
 
 
-  def add_neighbors(self, y, x, visited=[]):
+  def add_neighbors(self, coord, visited=[]):
+    y, x = coord
     toVisit = []
-    if not [y-1,x] in visited and y - 1 >= PreProcessStat.LOW_Y and self.is_black(self.img[y - 1, x]):
-      toVisit.append([y-1,x])
-    if not [y+1,x] in visited and y + 1 < PreProcessStat.HIGH_Y and self.is_black(self.img[y + 1, x]):
-      toVisit.append([y+1,x])
-    if not [y,x-1] in visited and x - 1 >= PreProcessStat.LOW_X and self.is_black(self.img[y, x - 1]):
-      toVisit.append([y,x-1])
-    if not [y,x+1] in visited and x + 1 < PreProcessStat.HIGH_X and self.is_black(self.img[y, x + 1]):
-      toVisit.append([y,x+1])
+    if not (y-1,x) in visited and y - 1 >= PreProcessStat.LOW_Y and self.is_black(self.img[y-1, x]):
+      toVisit.append((y-1,x))
+    if not (y+1,x) in visited and y + 1 < PreProcessStat.HIGH_Y and self.is_black(self.img[y+1, x]):
+      toVisit.append((y+1,x))
+    if not (y,x-1) in visited and x - 1 >= PreProcessStat.LOW_X and self.is_black(self.img[y, x-1]):
+      toVisit.append((y,x-1))
+    if not (y,x+1) in visited and x + 1 < PreProcessStat.HIGH_X and self.is_black(self.img[y, x+1]):
+      toVisit.append((y,x+1))
     return toVisit

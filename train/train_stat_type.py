@@ -80,7 +80,7 @@ class TrainStatType:
       y.append(label)
 
     x = np.array(x) / 255
-    x.reshape(-1, ImageSplitter.STAT_SIZE, ImageSplitter.STAT_SIZE, 1)
+    x.reshape(-1, ImageSplitter.STAT_DATA.size[0], ImageSplitter.STAT_DATA.size[1], 1)
     y = np.array(y)
     return (x, y)
 
@@ -94,7 +94,7 @@ class TrainStatType:
   def get_model(self):
     model = Sequential()
     model.add(Conv2D(32,3,padding="same", activation="relu",
-      input_shape=(ImageSplitter.STAT_SIZE,ImageSplitter.STAT_SIZE,3)))
+      input_shape=(ImageSplitter.STAT_DATA.size[0], ImageSplitter.STAT_DATA.size[1], 3)))
     model.add(MaxPool2D())
 
     model.add(Conv2D(32, 3, padding="same", activation="relu"))

@@ -144,7 +144,7 @@ class TestPreProcessSet(unittest.TestCase):
     self.addSquareAtoLocation(img, origin, 2)
     processor = PreProcessStat(img)
 
-    x = processor.size_area(0, 0)[0]
+    x = processor.size_area((0, 0))[0]
     self.assertEqual(4, x)
 
 

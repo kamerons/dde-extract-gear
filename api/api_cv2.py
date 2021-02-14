@@ -2,6 +2,9 @@ import cv2
 
 class ApiCv2:
 
+  def __init__(self, quiet_mode=False):
+    self.show_images = not quiet_mode
+
   def imread(self, file_name):
     return cv2.imread(file_name)
 
@@ -26,6 +29,7 @@ class ApiCv2:
     return cv2.filter2D(img, ddepth, kernel)
 
   def show_img(self, img, window_name="img", waitKey=0):
-    cv2.imshow(window_name, img)
-    cv2.waitKey(waitKey)
-    cv2.destroyAllWindows()
+    if self.show_images:
+      cv2.imshow(window_name, img)
+      cv2.waitKey(waitKey)
+      cv2.destroyAllWindows()
