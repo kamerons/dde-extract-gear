@@ -1,7 +1,10 @@
 import os
 from datetime import datetime
 
-from api.api_builtin import ApiBuiltIn
+from api.safe_builtin import SafeBuiltIn
+from api.safe_cv2 import SafeCv2
+from api.safe_json import SafeJson
+
 from api.api_curses import ApiCurses
 from api.api_cv2 import ApiCv2
 from api.api_json import ApiJson
@@ -30,10 +33,11 @@ class Index:
   STAT_VALUE_KEY = "num"
 
   def __init__(self, file, api_builtin=None, api_curses=None, api_cv2=None, api_json=None, api_time=None):
-    self.api_builtin = api_builtin if api_builtin else ApiBuiltIn()
+    self.api_builtin = api_builtin if api_builtin else SafeBuiltIn()
+    self.api_cv2 = api_cv2 if api_cv2 else SafeCv2()
+    self.api_json = api_json if api_json else SafeJson()
+
     self.api_curses = api_curses if api_curses else ApiCurses()
-    self.api_cv2 = api_cv2 if api_cv2 else ApiCv2()
-    self.api_json = api_json if api_json else ApiJson()
     self.api_time = api_time if api_time else ApiTime()
 
     self.file = file

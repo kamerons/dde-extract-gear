@@ -4,7 +4,7 @@ import os
 import pytesseract
 import sys
 
-from api.api_cv2 import ApiCv2
+from api.safe_cv2 import SafeCv2
 from extract_gear.preprocess_stat import PreProcessStat
 from extract_gear.preprocess_level import PreProcessLevel
 from extract_gear.preprocess_set import PreProcessSet
@@ -14,7 +14,7 @@ from folder.folder import Folder
 class SlideShow:
 
   def __init__(self, api_cv2=None):
-    self.api_cv2 = api_cv2 if api_cv2 else ApiCv2()
+    self.api_cv2 = api_cv2 if api_cv2 else SafeCv2()
 
 
   def run(self, method):

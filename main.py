@@ -80,7 +80,7 @@ elif command == INDEX:
   else:
     print("Starting index.  This operation will change data on the disc.  This operation may overwrite index.json")
     input("Press enter to confirm")
-    index = Index(arg.file)
+    index = Index(arg.file, api_builtin=ApiBuiltIn(), api_json=ApiJson())
   index.run_index_creation()
 
 elif command == TRAIN:

@@ -9,10 +9,6 @@ class PreProcessor:
   WHITE_VALUE_THRESHOLD = 180
 
 
-  def __init__(self):
-    pass
-
-
   def is_red(self, pixel):
     blue, green, red = pixel
     return (red > PreProcessor.PIXEL_COLOR_THRESHOLD

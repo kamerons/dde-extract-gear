@@ -4,14 +4,14 @@ import os
 import sys
 import pytesseract
 
-from api.api_cv2 import ApiCv2
+from api.safe_cv2 import SafeCv2
 from extract_gear.extract_image import ExtractImage
 from folder.folder import Folder
 
 class Extract:
 
   def __init__(self, api_cv2=None):
-    self.api_cv2 = api_cv2 if api_cv2 else ApiCv2()
+    self.api_cv2 = api_cv2 if api_cv2 else SafeCv2()
 
 
   def run(self, method):
