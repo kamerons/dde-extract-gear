@@ -1,3 +1,5 @@
+import numpy as np
+
 from extract_gear.preprocess import PreProcessor
 
 class PreProcessStat(PreProcessor):
@@ -14,6 +16,7 @@ class PreProcessStat(PreProcessor):
     self.img = img
     self.y_size = img.shape[0]
     self.x_size = img.shape[1]
+    self.digits = []
 
 
   def process_stat(self):
@@ -24,8 +27,8 @@ class PreProcessStat(PreProcessor):
 
 
   def increase_contrast(self):
-    for y in range(self.y_size):
-      for x in range(self.x_size):
+    for x in range(self.x_size):
+      for y in range(self.y_size):
         if (not y in range(PreProcessStat.LOW_Y, PreProcessStat.HIGH_Y)
           or not x in range(PreProcessStat.LOW_X, PreProcessStat.HIGH_X)):
           self.img[y,x] = [255, 255, 255]
@@ -39,6 +42,23 @@ class PreProcessStat(PreProcessor):
           self.img[y,x] = [0, 0, 0]
         else:
           self.img[y,x] = [255, 255, 255]
+
+
+  def copy_digits(self, coordinates):
+    min_y = PreProcessStat.HIGH_Y
+    min_x = PreProcessStat.HIGH_X
+    for coordinate in coordinates:
+      min_y = min(min_y, coordinate[0])
+      min_x = min(min_x, coordinate[1])
+
+    digit = np.full((56,56,3), (255, 255, 255), dtype=np.uint8)
+    y_adj = 25 - min_y
+    x_adj = 25 - min_x
+    for coordinate in coordinates:
+      y = coordinate[0] + y_adj
+      x = coordinate[1] + x_adj
+      digit[y,x] = [0, 0, 0]
+    self.digits.append(digit)
 
 
   # often, we detect erroneous detail close to the edge of the bounding box. However, a number
@@ -60,14 +80,17 @@ class PreProcessStat(PreProcessor):
   # Remove small leftovers pixels that have a small area. Numbers will never have a small area
   def trim_splotches(self):
     visited = []
-    for y in range(PreProcessStat.LOW_Y, PreProcessStat.HIGH_Y):
-      for x in range(PreProcessStat.LOW_X, PreProcessStat.HIGH_X):
+    # this order ensures we encounter the leftmost digits first
+    for x in range(PreProcessStat.LOW_X, PreProcessStat.HIGH_X):
+      for y in range(PreProcessStat.LOW_Y, PreProcessStat.HIGH_Y):
         if [y, x] in visited:
           continue
         if self.is_black(self.img[y, x]):
           aSize, aVisited = self.size_area(y, x)
           if aSize < PreProcessStat.AREA_THRESHOLD:
             self.remove_area(y, x)
+          else:
+            self.copy_digits(aVisited)
           for coord in aVisited:
             visited.append(coord)
 

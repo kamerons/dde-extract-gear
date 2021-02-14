@@ -25,9 +25,22 @@ class ExtractImage:
 
   STAT_SIZE = 56
 
+  Y_CARD_OFFSET = -112
+  X_CARD_OFFSET = -10
+
+  CARD_WIDTH = 350
+  CARD_HEIGHT =  430
 
   def __init__(self):
     pass
+
+
+  def extract_stat_card(self, img, coord):
+    low_y, low_x = self.get_start_coord(coord[0], coord[1], ExtractImage.Y_CARD_OFFSET, ExtractImage.X_CARD_OFFSET)
+    high_y = low_y + ExtractImage.CARD_HEIGHT
+    high_x = low_x + ExtractImage.CARD_WIDTH
+
+    return img[low_y:high_y, low_x:high_x]
 
 
   def extract_stat_images(self, img, y, x):

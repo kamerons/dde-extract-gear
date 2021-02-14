@@ -29,7 +29,7 @@ from train.train_stat_type import TrainStatType
 
 class ExtractRealData:
 
-  ARMOR_TYPES = ["Chain Armor Set", "Dark Lord's Set", "Dragon Slayer Set",
+  SET_TYPES = ["Chain Armor Set", "Dark Lord's Set", "Dragon Slayer Set",
     "Goblin Raider Set", "Great Hero Set", "Leather Armor Set", "Knight Set", "Plate Armor Set"]
 
   MIN_LEVENSHTEIN = 65
@@ -41,6 +41,7 @@ class ExtractRealData:
     self.api_pytesseract = api_pytesseract if api_pytesseract else ApiPyTesseract()
     self.extract_image = extract_image if extract_image else ExtractImage()
     self.stat_type_model = tensorflow.keras.models.load_model(Folder.STAT_TYPE_MODEL_FOLDER)
+    self.stat_value_model = tensorflow.keras.models.load_model(Folder.STAT_VALUE_MODEL_FOLDER)
 
 
   def run(self):
@@ -49,26 +50,32 @@ class ExtractRealData:
       print("File name: %s" % file_name)
       coord = int(file_name[1]), int(file_name[0])
       img = self.api_cv2.imread(Folder.PREPROCESS_FOLDER + file_name)
-      print(self.get_img(img, coord))
-      input()
+      card = self.extract_image.extract_stat_card(img, coord)
+      copy = np.full(card.shape, (0,0,0), dtype=np.uint8)
+      for y in range(card.shape[0]):
+        for x in range(copy.shape[1]):
+          copy[y,x] = card[y,x]
+      print(self.get_img_data(img, coord))
+      #self.api_cv2.show_img(copy)
 
 
-  def get_img(self, img, coord):
+  def get_img_data(self, img, coord):
     armor_type = self.get_armor_type(img, coord)
+    #self.api_cv2.show_img(self.extract_image.extract_stat_card(img, coord))
     stats = self.get_stat_types(img, coord)
     max_level = 16
     current_level = 1
-    return {
-      'armor_type': armor_type, 'stats': stats, 'max_level': max_level,
-      'current_level': current_level
-    }
+    data = {'armor_set': armor_type, 'current_level': current_level, 'max_level': max_level}
+    for stat_key in stats:
+      data[stat_key] = stats[stat_key]
+    return data
 
 
   def get_armor_type(self, img, coord):
     guess = self.get_armor_type_guess(img, coord)
     highest = 0
     highest_type = ""
-    for armor_type in ExtractRealData.ARMOR_TYPES:
+    for armor_type in ExtractRealData.SET_TYPES:
       ratio = self.api_fuzzzywuzzy.ratio(armor_type.lower(), guess.lower())
       if ratio > highest:
         highest_type = armor_type
@@ -88,18 +95,34 @@ class ExtractRealData:
 
   def get_stat_types(self, img, coord):
     images = self.extract_image.extract_stat_images(img, coord[0], coord[1])
-    processed_images = TrainStatType.get_preprocess(images)
+    processed_images = self.preprocess_for_stat_type(images)
     predictions = self.stat_type_model.predict_classes(processed_images, batch_size=10, verbose=0)
     stats = {}
     for i in range(14):
       prediction = predictions[i]
+      print(Index.STAT_OPTIONS[prediction])
+      #self.api_cv2.show_img(processed_images[i])
       if Index.STAT_OPTIONS[prediction] != 'none':
         stats[Index.STAT_OPTIONS[prediction]] = self.get_stat_num(images[i])
     return stats
 
 
   def get_stat_num(self, img):
-    return 0
+    preprocessor = PreProcessStat(img)
+    #self.api_cv2.show_img(img)
+    preprocessor.process_stat()
+    #for i in preprocessor.digits:
+    #  self.api_cv2.show_img(i)
+    digits = []
+    for digit_image in preprocessor.digits:
+      digits.append(digit_image)
+    digits = self.preprocess_for_stat_type(digits)
+    digit_predictions = self.stat_value_model.predict_classes(digits, verbose=0)
+    num = 0
+    for digit in digit_predictions:
+      num = num * 10
+      num += digit
+    return num
 
 
   #THIS IS COPIED CODE FROM TRAIN_STAT_TYPE

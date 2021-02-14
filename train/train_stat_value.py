@@ -12,8 +12,8 @@ from tensorflow.keras.optimizers import Adam
 from sklearn.metrics import classification_report,confusion_matrix
 
 import os
-
 import numpy as np
+import sys
 
 from api.safe_builtin import SafeBuiltIn
 from api.safe_cv2 import SafeCv2
@@ -22,9 +22,10 @@ from api.api_random import ApiRandom
 
 from extract_gear.index import Index
 from extract_gear.extract_image import ExtractImage
+from extract_gear.preprocess_stat import PreProcessStat
 from folder.folder import Folder
 
-class TrainStatType:
+class TrainStatValue:
 
   def __init__(self, safe):
     self.api_builtin = SafeBuiltIn()
@@ -39,8 +40,8 @@ class TrainStatType:
       index = self.api_json.load(fp)
       train, test = self.split_index(.7, index)
 
-      x_train, y_train = TrainStatType.get_preprocess(train)
-      x_test, y_test = TrainStatType.get_preprocess(test)
+      x_train, y_train = TrainStatValue.get_preprocess(train)
+      x_test, y_test = TrainStatValue.get_preprocess(test)
 
       datagen = ImageDataGenerator(
         featurewise_center=False,
@@ -59,17 +60,17 @@ class TrainStatType:
       model = self.get_model()
       model.summary(print_fn=self.api_builtin.print)
 
-      opt = Adam(lr=0.0000002)
+      opt = Adam(lr=0.0000005)
       model.compile(optimizer=opt, loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
         metrics=['accuracy'])
-      model.fit(x_train, y_train, epochs=10000, validation_data=(x_test, y_test))
+      model.fit(x_train, y_train, epochs=4000, validation_data=(x_test, y_test))
       predictions = model.predict_classes(x_test)
       predictions = predictions.reshape(1,-1)[0]
-      self.api_builtin.print(classification_report(y_test, predictions, target_names=Index.STAT_OPTIONS))
+      self.api_builtin.print(classification_report(y_test, predictions, target_names=["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]))
       if not self.safe:
-        model.save(Folder.STAT_TYPE_MODEL_FOLDER)
+        model.save(Folder.STAT_VALUE_MODEL_FOLDER)
       else:
-        self.api_builtin.print("Would save model to: " + Folder.STAT_TYPE_MODEL_FOLDER)
+        self.api_builtin.print("Would save model to: " + Folder.STAT_VALUE_MODEL_FOLDER)
 
 
   def get_preprocess(data):
@@ -83,12 +84,6 @@ class TrainStatType:
     x.reshape(-1, ExtractImage.STAT_SIZE, ExtractImage.STAT_SIZE, 1)
     y = np.array(y)
     return (x, y)
-
-
-  def preview(self, arr):
-    print(str(arr[1]))
-    self.api_builtin.print(Index.STAT_OPTIONS[arr[1]])
-    self.api_cv2.show_img(arr[0])
 
 
   def get_model(self):
@@ -106,7 +101,7 @@ class TrainStatType:
 
     model.add(Flatten())
     model.add(Dense(128,activation="relu"))
-    model.add(Dense(len(Index.STAT_OPTIONS)))
+    model.add(Dense(10))
     return model
 
 
@@ -114,36 +109,55 @@ class TrainStatType:
     self.api_random.shuffle(index)
     num = {}
     num_train = {}
-    for key in Index.STAT_OPTIONS:
-      num[key] = 0
-      num_train[key] = 0
+    for i in range(10):
+      num[i] = 0
+      num_train[i] = 0
 
     for d in index:
-      num[d[Index.TYPE_KEY]] += 1
+      if d[Index.TYPE_KEY] != "none":
+        for digit in self.get_digits(d[Index.VALUE_KEY]):
+          num[digit] += 1
 
-    minimum = len(index)
-    for key in Index.STAT_OPTIONS:
-      if num[key] < minimum:
-        minimum = num[key]
+    minimum = sys.maxsize
+    for d in range(10):
+      if num[d] < minimum:
+        minimum = num[d]
 
     train = []
     test = []
-    for d in index:
-      stat_type = d[Index.TYPE_KEY]
-      if num_train[stat_type] < ratio * minimum:
-        num_train[stat_type] += 1
-        x = self.read_img(d, stat_type)
-        train.append(x)
-      elif num_train[stat_type] >= minimum:
+    for data_item in index:
+      if data_item[Index.TYPE_KEY] == "none":
         continue
-      else:
-        num_train[stat_type] += 1
-        x = self.read_img(d, stat_type)
-        test.append(x)
+      img_and_num = self.read_img(data_item)
+      for img, num in img_and_num:
+        if num_train[num] < ratio * minimum:
+          num_train[num] += 1
+          train.append([img, num])
+        elif num_train[num] >= minimum:
+          continue
+        else:
+          num_train[num] += 1
+          test.append([img, num])
     return train, test
 
 
-  def read_img(self, data, stat_type):
+  def read_img(self, data):
     file_name = Folder.STAT_CROP_FOLDER + data[Index.FILE_KEY]
-    stat_index = Index.STAT_OPTIONS.index(stat_type)
-    return [self.api_cv2.imread(file_name), stat_index]
+    original = self.api_cv2.imread(file_name)
+    preprocessor = PreProcessStat(original)
+    preprocessor.process_stat()
+    num = data[Index.VALUE_KEY]
+    digit_nums = self.get_digits(num)
+    img_and_num = []
+    for i in range(len(digit_nums)):
+      img_and_num.append([preprocessor.digits[i], digit_nums[i]])
+    return img_and_num
+
+
+  def get_digits(self, num):
+    digits = []
+    while num > 0:
+      digits.append(num % 10)
+      num = int(num / 10)
+    digits.reverse()
+    return digits

@@ -12,6 +12,7 @@ from api.safe_builtin import SafeBuiltIn
 from api.safe_cv2 import SafeCv2
 from api.safe_json import SafeJson
 from api.safe_pyautogui import SafePyAutoGui
+from api.api_time import ApiTime
 
 from extract_gear.extract import Extract
 from extract_gear.extract_image import ExtractImage
@@ -27,6 +28,7 @@ SLIDESHOW = "slideshow"
 EXTRACT = "extract"
 INDEX = "index"
 TRAIN = "train"
+REAL = "real"
 
 command_options = [GEAR_COLLECT, SLIDESHOW, EXTRACT, TRAIN]
 
@@ -90,6 +92,23 @@ elif command == TRAIN:
 
   #put down here to save on startup time
   from train.train_stat_type import TrainStatType
+  from train.train_stat_value import TrainStatValue
 
-  train_stat_type = TrainStatType(arg.safe)
-  train_stat_type.train()
+  if arg.command[1] == "type":
+    train_stat_type = TrainStatType(arg.safe)
+    train_stat_type.train()
+  else:
+    train_stat_value = TrainStatValue(arg.safe)
+    train_stat_value.train()
+
+elif command == REAL:
+  if arg.safe:
+    print("Real data extraction cannot be started in safe mode")
+    exit()
+
+  #put down here to save on startup time
+  input("Beginning extraction of real data.  Press enter to confirm")
+  from extract_gear.extract_gear import ExtractGear
+  extract_gear = ExtractGear(ApiBuiltIn(), api_cv2=ApiCv2(), api_pyautogui=ApiPyAutoGui(),
+    api_json=ApiJson(), api_time=ApiTime())
+  extract_gear.run()
