@@ -7,6 +7,7 @@ from api.api_cv2 import ApiCv2
 from api.api_json import ApiJson
 from api.api_time import ApiTime
 from extract_gear.cli import Cli
+from folder.folder import Folder
 
 # Creates an index file of the form:
 # [
@@ -72,10 +73,10 @@ class Index:
 
 
   def collect_loop(self, stdscr):
-    files = sorted(os.listdir('data/stat/process/'))
+    files = sorted(os.listdir(Folder.STAT_CROP_FOLDER))
     while self.idx <  len(files):
       file_name = files[self.idx]
-      self.img = self.api_cv2.imread('data/stat/process/' + file_name)
+      self.img = self.api_cv2.imread(Folder.STAT_CROP_FOLDER + file_name)
       data = self.collect_data_item()
       if data == 'correct':
         self.idx = max(self.idx - 1, 0)
@@ -145,7 +146,7 @@ class Index:
     while self.idx < len(self.data_index):
       correct = " "
       data = self.data_index[self.idx]
-      self.img = self.api_cv2.imread('data/stat/process/' + data[Index.FILE_NAME_KEY])
+      self.img = self.api_cv2.imread(Folder.STAT_CROP_FOLDER + data[Index.FILE_NAME_KEY])
       self.print_stat_data(data)
       self.api_cv2.show_img(self.img)
       while correct != "":
@@ -188,7 +189,7 @@ class Index:
   def set_state_for_resume(self):
     with self.api_builtin.open(self.file, "r") as fp:
       self.data_index = self.api_json.load(fp)
-      total = len(os.listdir('data/stat/process/'))
+      total = len(os.listdir(Folder.STAT_CROP_FOLDER))
       if len(self.data_index) == total:
         self.idx = 0
         self.stage = 1
@@ -212,13 +213,13 @@ class Index:
       self.cli.print(print_str)
 
   def write_file(self, prefix=""):
-    with self.api_builtin.open("data/stat/save/" + prefix + Index.get_time() + '-index.json', 'w') as fp:
+    with self.api_builtin.open(Folder.STAT_SAVE_FOLDER + prefix + Index.get_time() + '-index.json', 'w') as fp:
       self.api_json.dump(self.data_index, fp)
 
 
   def save_progress(self, data):
     self.cli.print("saving progress and exiting")
-    with self.api_builtin.open('data/stat/save/progress.json', 'w') as fp:
+    with self.api_builtin.open(Folder.PROGRESS_FILE, 'w') as fp:
       self.api_json.dump(data, fp)
       exit()
 

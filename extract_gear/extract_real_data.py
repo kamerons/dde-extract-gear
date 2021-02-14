@@ -45,7 +45,7 @@ class ExtractRealData:
 
 
   def run(self):
-    files = sorted(os.listdir('data/preprocess/'))
+    files = sorted(os.listdir(Folder.PREPROCESS_FOLDER))
     for file_name in files:
       print("File name: %s" % file_name)
       coord = int(file_name[1]), int(file_name[0])

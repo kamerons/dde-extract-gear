@@ -8,8 +8,8 @@ from api.api_cv2 import ApiCv2
 from extract_gear.preprocess_stat import PreProcessStat
 from extract_gear.preprocess_level import PreProcessLevel
 from extract_gear.preprocess_set import PreProcessSet
-
 from extract_gear.index import Index
+from folder.folder import Folder
 
 class SlideShow:
 
@@ -28,7 +28,7 @@ class SlideShow:
 
   def run_confirm_stat(self):
     index = []
-    with open("data/stat/save/correction-complete09-02-2021_02-57-04-index.json") as fp:
+    with open(Folder.STAT_SAVE_FOLDER + "correction-complete09-02-2021_02-57-04-index.json") as fp:
       index = json.load(fp)
 
     failed = []
@@ -41,8 +41,8 @@ class SlideShow:
 
 
   def run_confirm_level(self):
-    for file_name in os.listdir('data/level/process/'):
-      img = self.api_cv2.imread('data/level/process/' + file_name)
+    for file_name in os.listdir(Folder.LEVEL_CROP_FOLDER):
+      img = self.api_cv2.imread(Folder.LEVEL_CROP_FOLDER + file_name)
       preprocessor = PreProcessLevel(img)
       img = preprocessor.process_level()
       guess = pytesseract.image_to_string(img).strip()
@@ -51,8 +51,8 @@ class SlideShow:
 
 
   def run_confirm_set(self):
-    for file_name in os.listdir('data/set/process/'):
-      img = self.api_cv2.imread('data/set/process/' + file_name)
+    for file_name in os.listdir(Folder.SET_CROP_FOLDER):
+      img = self.api_cv2.imread(Folder.SET_CROP_FOLDER + file_name)
       preprocessor = PreProcessSet(img)
       img = preprocessor.process_set()
       guess = pytesseract.image_to_string(img).strip()
@@ -64,7 +64,7 @@ class SlideShow:
     for data in index:
       if data[Index.STAT_TYPE_KEY] == Index.NONE:
         continue
-      img = self.api_cv2.imread('data/stat/process/' + data[Index.FILE_NAME_KEY])
+      img = self.api_cv2.imread(Folder.SET_CROP_FOLDER + data[Index.FILE_NAME_KEY])
       preprocessor = PreProcessStat(img)
       img = preprocessor.process_stat()
       guess = pytesseract.image_to_string(img).strip()
@@ -81,7 +81,7 @@ class SlideShow:
 
   def slideshow_failed(self, failed):
     for failure in failed:
-      img = self.api_cv2.imread('data/stat/process/' + failure[Index.FILE_NAME_KEY])
+      img = self.api_cv2.imread(Folder.SET_CROP_FOLDER + failure[Index.FILE_NAME_KEY])
       preprocessor = PreProcessStat(np.array(img, copy=True))
       img2 = preprocessor.process_stat()
       img3 = np.full((56,56*2, 3), (0, 0, 0), dtype=np.uint8)

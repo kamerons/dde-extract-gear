@@ -1,4 +1,5 @@
 from api.api_time import ApiTime
+from folder.folder import Folder
 
 class GearCollecter:
 
@@ -20,13 +21,12 @@ class GearCollecter:
     self.api_builtin.print("press enter when ready, you will have 10 seconds to prepare")
     self.api_builtin.input("")
     self.countdown(10, True)
-    dir = 'data/preprocess/'
     i = 0
     #at most 1000 pieces of gear
     while i < 1000:
       for row in range(1, 4):
         for column in range(1, 6):
-          name = '%s%d%d_%03d.png' % (dir, column, row, i)
+          name = '%s%d%d_%03d.png' % (Folder.PREPROCESS_FOLDER, column, row, i)
           self.api_pyautogui.screenshot(name)
           self.api_builtin.print("Took screenshot: %s" % name)
           if row == 3 and column == 5:

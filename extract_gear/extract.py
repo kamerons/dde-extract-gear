@@ -6,6 +6,7 @@ import pytesseract
 
 from api.api_cv2 import ApiCv2
 from extract_gear.extract_image import ExtractImage
+from folder.folder import Folder
 
 class Extract:
 
@@ -30,10 +31,10 @@ class Extract:
 
   def run_extract_stat_data(self):
     num = 0
-    files = sorted(os.listdir('data/preprocess/'))
+    files = sorted(os.listdir(Folder.PREPROCESS_FOLDER))
     extract_image = ExtractImage()
     for file_name in files:
-      img = self.api_cv2.imread('data/preprocess/' + file_name)
+      img = self.api_cv2.imread(Folder.PREPROCESS_FOLDER + file_name)
       print("Processing " + file_name)
       y = int(file_name[1])
       x = int(file_name[0])
@@ -47,17 +48,17 @@ class Extract:
           name = "row1_%03d_%d.png" % (num, i - 4)
         else:
           name = "row2_%03d_%d.png" % (num, i - 10)
-        self.api_cv2.imwrite('data/stat/process/%s' % name, img)
+        self.api_cv2.imwrite('%s%s' % (Folder.STAT_CROP_FOLDER, name), img)
         num += 1
         i += 1
 
 
   def run_extract_level_data(self):
     num = 0
-    files = sorted(os.listdir('data/preprocess/'))
+    files = sorted(os.listdir(Folder.PREPROCESS_FOLDER))
     extract_image = ExtractImage()
     for file_name in files:
-      img = self.api_cv2.imread('data/preprocess/' + file_name)
+      img = self.api_cv2.imread(Folder.PREPROCESS_FOLDER + file_name)
       print("Processing " + file_name)
       y = int(file_name[1])
       x = int(file_name[0])
@@ -82,16 +83,16 @@ class Extract:
         index_to_save = int(input('Which image should be saved? (Zero-based)'))
         img = images[index_to_save]
 
-      self.api_cv2.imwrite("data/level/process/%03d.png" % num, img)
+      self.api_cv2.imwrite("%s%03d.png" % (Folder.LEVEL_CROP_FOLDER, num), img)
       num += 1
 
 
   def run_extract_set_data(self):
     num = 0
-    files = sorted(os.listdir('data/preprocess/'))
+    files = sorted(os.listdir(Folder.PREPROCESS_FOLDER))
     extract_image = ExtractImage()
     for file_name in files:
-      img = self.api_cv2.imread('data/preprocess/' + file_name)
+      img = self.api_cv2.imread(Folder.PREPROCESS_FOLDER + file_name)
       print("Processing %d of %d"  % (num + 1, len(files)))
       y = int(file_name[1])
       x = int(file_name[0])
@@ -99,5 +100,5 @@ class Extract:
       self.api_cv2.imshow('img', img)
       self.api_cv2.waitKey(0)
       self.api_cv2.destroyAllWindows()
-      self.api_cv2.imwrite('data/set/process/%03d.png' % num, img)
+      self.api_cv2.imwrite('%s%03d.png' % (Folder.SET_CROP_FOLDER, num), img)
       num += 1
