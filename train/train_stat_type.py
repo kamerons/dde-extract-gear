@@ -119,7 +119,7 @@ class TrainStatType:
       num_train[key] = 0
 
     for d in index:
-      num[d[Index.TYPE_KEY]] += 1
+      num[d[Index.STAT_TYPE_KEY]] += 1
 
     minimum = len(index)
     for key in Index.STAT_OPTIONS:
@@ -129,7 +129,7 @@ class TrainStatType:
     train = []
     test = []
     for d in index:
-      stat_type = d[Index.TYPE_KEY]
+      stat_type = d[Index.STAT_TYPE_KEY]
       if num_train[stat_type] < ratio * minimum:
         num_train[stat_type] += 1
         x = self.read_img(d, stat_type)
@@ -144,6 +144,6 @@ class TrainStatType:
 
 
   def read_img(self, data, stat_type):
-    file_name = Folder.STAT_CROP_FOLDER + data[Index.FILE_KEY]
+    file_name = Folder.STAT_CROP_FOLDER + data[Index.FILE_NAME_KEY]
     stat_index = Index.STAT_OPTIONS.index(stat_type)
     return [self.api_cv2.imread(file_name), stat_index]

@@ -9,6 +9,8 @@ from extract_gear.preprocess_stat import PreProcessStat
 from extract_gear.preprocess_level import PreProcessLevel
 from extract_gear.preprocess_set import PreProcessSet
 
+from extract_gear.index import Index
+
 class SlideShow:
 
   def __init__(self, api_cv2=None):
@@ -60,14 +62,14 @@ class SlideShow:
   def calculate_success_rate(self, index, failed):
     total = 0
     for data in index:
-      if data['type'] == "none":
+      if data[Index.STAT_TYPE_KEY] == Index.NONE:
         continue
-      img = self.api_cv2.imread('data/stat/process/' + data['file_name'])
+      img = self.api_cv2.imread('data/stat/process/' + data[Index.FILE_NAME_KEY])
       preprocessor = PreProcessStat(img)
       img = preprocessor.process_stat()
       guess = pytesseract.image_to_string(img).strip()
       guess = "".join(e for e in guess if e.isalnum())
-      if guess != str(data['num']):
+      if guess != str(data[Index.STAT_VALUE_KEY]):
         fail_data = data.copy()
         fail_data['guess'] = guess
         failed.append(fail_data)
@@ -79,7 +81,7 @@ class SlideShow:
 
   def slideshow_failed(self, failed):
     for failure in failed:
-      img = self.api_cv2.imread('data/stat/process/' + failure['file_name'])
+      img = self.api_cv2.imread('data/stat/process/' + failure[Index.FILE_NAME_KEY])
       preprocessor = PreProcessStat(np.array(img, copy=True))
       img2 = preprocessor.process_stat()
       img3 = np.full((56,56*2, 3), (0, 0, 0), dtype=np.uint8)
@@ -88,5 +90,5 @@ class SlideShow:
         for x in range(56):
           img3[y,x] = img[y,x]
           img3[y,x+56] = img2[y,x]
-      print("Guess was %s, actual was %s for %s" % (failure['guess'], failure['num'], failure['file_name']))
+      print("Guess was %s, actual was %s for %s" % (failure['guess'], failure[Index.STAT_VALUE_KEY], failure[Index.FILE_NAME_KEY]))
       self.api_cv2.show_img(img3)

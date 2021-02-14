@@ -114,8 +114,8 @@ class TrainStatValue:
       num_train[i] = 0
 
     for d in index:
-      if d[Index.TYPE_KEY] != "none":
-        for digit in self.get_digits(d[Index.VALUE_KEY]):
+      if d[Index.STAT_TYPE_KEY] != Index.NONE:
+        for digit in self.get_digits(d[Index.STAT_VALUE_KEY]):
           num[digit] += 1
 
     minimum = sys.maxsize
@@ -126,7 +126,7 @@ class TrainStatValue:
     train = []
     test = []
     for data_item in index:
-      if data_item[Index.TYPE_KEY] == "none":
+      if data_item[Index.STAT_TYPE_KEY] == Index.NONE:
         continue
       img_and_num = self.read_img(data_item)
       for img, num in img_and_num:
@@ -142,11 +142,11 @@ class TrainStatValue:
 
 
   def read_img(self, data):
-    file_name = Folder.STAT_CROP_FOLDER + data[Index.FILE_KEY]
+    file_name = Folder.STAT_CROP_FOLDER + data[Index.FILE_NAME_KEY]
     original = self.api_cv2.imread(file_name)
     preprocessor = PreProcessStat(original)
     preprocessor.process_stat()
-    num = data[Index.VALUE_KEY]
+    num = data[Index.STAT_VALUE_KEY]
     digit_nums = self.get_digits(num)
     img_and_num = []
     for i in range(len(digit_nums)):

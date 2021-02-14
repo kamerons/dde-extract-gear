@@ -102,7 +102,7 @@ class ExtractRealData:
       prediction = predictions[i]
       print(Index.STAT_OPTIONS[prediction])
       #self.api_cv2.show_img(processed_images[i])
-      if Index.STAT_OPTIONS[prediction] != 'none':
+      if Index.STAT_OPTIONS[prediction] != Index.NONE:
         stats[Index.STAT_OPTIONS[prediction]] = self.get_stat_num(images[i])
     return stats
 

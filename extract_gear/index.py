@@ -19,12 +19,14 @@ from extract_gear.cli import Cli
 # ]
 class Index:
 
-  STAT_OPTIONS = ['electric', 'fire', 'poison', 'base', 'hero_dmg', 'hero_hp', 'hero_speed',
-    'hero_rate', 'offense', 'defense', 'tower_dmg', 'tower_rate', 'tower_hp', 'tower_range', 'none']
+  NONE = "none"
 
-  TYPE_KEY = "type"
-  FILE_KEY = "file_name"
-  VALUE_KEY = "num"
+  STAT_OPTIONS = ['electric', 'fire', 'poison', 'base', 'hero_dmg', 'hero_hp', 'hero_speed',
+    'hero_rate', 'offense', 'defense', 'tower_dmg', 'tower_rate', 'tower_hp', 'tower_range', NONE]
+
+  STAT_TYPE_KEY = "type"
+  FILE_NAME_KEY = "file_name"
+  STAT_VALUE_KEY = "num"
 
   def __init__(self, file, api_builtin=None, api_curses=None, api_cv2=None, api_json=None, api_time=None):
     self.api_builtin = api_builtin if api_builtin else ApiBuiltIn()
@@ -80,7 +82,7 @@ class Index:
         self.data_index = self.data_index[:len(self.data_index)-1]
         continue
 
-      data['file_name'] = file_name
+      data[Index.FILE_NAME_KEY] = file_name
       self.data_index.append(data)
       self.idx += 1
       if self.idx % 100 == 0:
@@ -99,13 +101,13 @@ class Index:
     if stat_type == 'correct':
       return stat_type
 
-    if stat_type != 'none':
+    if stat_type != Index.NONE:
       stat_value = self.get_stat_value()
       if stat_value == 'correct':
         return stat_value
       else:
-        data['num'] = stat_value
-    data['type'] = stat_type
+        data[Index.STAT_VALUE_KEY] = stat_value
+    data[Index.STAT_TYPE_KEY] = stat_type
 
     return data
 
@@ -143,7 +145,7 @@ class Index:
     while self.idx < len(self.data_index):
       correct = " "
       data = self.data_index[self.idx]
-      self.img = self.api_cv2.imread('data/stat/process/' + data['file_name'])
+      self.img = self.api_cv2.imread('data/stat/process/' + data[Index.FILE_NAME_KEY])
       self.print_stat_data(data)
       self.api_cv2.show_img(self.img)
       while correct != "":
@@ -161,7 +163,7 @@ class Index:
             break
           else:
             new_data = tmp
-            new_data['file_name'] = data['file_name']
+            new_data[Index.FILE_NAME_KEY] = data[Index.FILE_NAME_KEY]
             data = new_data
             break
 
@@ -196,7 +198,7 @@ class Index:
 
 
   def print_stat_data(self, data):
-    stat_type = data['type']
+    stat_type = data[Index.STAT_TYPE_KEY]
     print_str = str(data) + "\n"
     if stat_type in ['electric', 'hero_speed', 'tower_range']:
       self.cli.print(print_str, Cli.BLUE)
