@@ -40,9 +40,7 @@ class Extract:
       images = extract_image.extract_stat_images(img, y, x)
       i = 0
       for img in images:
-        self.api_cv2.imshow('img', img)
-        self.api_cv2.waitKey(0)
-        self.api_cv2.destroyAllWindows()
+        self.api_cv2.show_img(img)
         if i in range(4):
           name = "defense_%03d_%d.png" % (num, i)
         elif i in range(4, 10):
@@ -65,9 +63,7 @@ class Extract:
       x = int(file_name[0])
       images = extract_image.extract_level_images(img, y, x)
       img = images[0]
-      self.api_cv2.imshow('img', img)
-      self.api_cv2.waitKey(0)
-      self.api_cv2.destroyAllWindows()
+      self.api_cv2.show_img(img)
       see_all = input("Save another image?  Enter any character to see the slideshow")
 
       if see_all != "":
@@ -82,9 +78,7 @@ class Extract:
               img_total[border_size * i + y + i * ExtractImage.LEVEL_HEIGHT,x] = img[y, x]
               i += 1
 
-        self.api_cv2.imshow('img', img_total)
-        self.api_cv2.waitKey(0)
-        self.api_cv2.destroyAllWindows()
+        self.api_cv2.show_img(img)
         index_to_save = int(input('Which image should be saved? (Zero-based)'))
         img = images[index_to_save]
 

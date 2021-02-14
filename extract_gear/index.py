@@ -94,7 +94,7 @@ class Index:
 
   def collect_data_item(self):
     data = {}
-    self.show_img()
+    self.api_cv2.show_img(self.img)
     stat_type = self.get_stat_type()
     if stat_type == 'correct':
       return stat_type
@@ -145,7 +145,7 @@ class Index:
       data = self.data_index[self.idx]
       self.img = self.api_cv2.imread('data/stat/process/' + data['file_name'])
       self.print_stat_data(data)
-      self.show_img()
+      self.api_cv2.show_img(self.img)
       while correct != "":
         correct = self.cli.input("Correct the data?\n>")
         if self.process_special_cmd(correct):
@@ -173,7 +173,7 @@ class Index:
 
   def process_special_cmd(self, input):
     if input == 'reshow':
-      self.show_img()
+      self.api_cv2.show_img(self.img)
       return True
     elif input == 'break':
       self.write_file("manual-")
@@ -219,12 +219,6 @@ class Index:
     with self.api_builtin.open('data/stat/save/progress.json', 'w') as fp:
       self.api_json.dump(data, fp)
       exit()
-
-
-  def show_img(self):
-    self.api_cv2.imshow('img', self.img)
-    self.api_cv2.waitKey(0)
-    self.api_cv2.destroyAllWindows()
 
 
   def get_time():

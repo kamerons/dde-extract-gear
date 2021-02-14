@@ -45,9 +45,7 @@ class SlideShow:
       img = preprocessor.process_level()
       guess = pytesseract.image_to_string(img).strip()
       print("The guess for this file was: %s" % guess)
-      self.api_cv2.imshow('img', img)
-      self.api_cv2.waitKey(0)
-      self.api_cv2.destroyAllWindows()
+      self.api_cv2.show_img(img)
 
 
   def run_confirm_set(self):
@@ -91,6 +89,4 @@ class SlideShow:
           img3[y,x] = img[y,x]
           img3[y,x+56] = img2[y,x]
       print("Guess was %s, actual was %s for %s" % (failure['guess'], failure['num'], failure['file_name']))
-      self.api_cv2.imshow('img', img3)
-      self.api_cv2.waitKey(0)
-      self.api_cv2.destroyAllWindows()
+      self.api_cv2.show_img(img3)
