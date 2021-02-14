@@ -4,3 +4,4 @@ env
 *.png
 *.json
 data/*model
+.vscode

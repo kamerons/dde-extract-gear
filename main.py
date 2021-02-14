@@ -7,30 +7,30 @@ from api.api_builtin import ApiBuiltIn
 from api.api_cv2 import ApiCv2
 from api.api_json import ApiJson
 from api.api_pyautogui import ApiPyAutoGui
+from api.api_time import ApiTime
 
 from api.safe_builtin import SafeBuiltIn
 from api.safe_cv2 import SafeCv2
 from api.safe_json import SafeJson
 from api.safe_pyautogui import SafePyAutoGui
-from api.api_time import ApiTime
 
-from extract_gear.extract import Extract
-from extract_gear.extract_image import ExtractImage
 from extract_gear.gear_collect import GearCollecter
+from extract_gear.image_split_collector import ImageSplitCollector
+from extract_gear.image_splitter import ImageSplitter
 from extract_gear.index import Index
-from extract_gear.slideshow import SlideShow
+from extract_gear.model_evaluator import ModelEvaluator
 
 from folder.folder import Folder
 
 
 GEAR_COLLECT = "gearcollect"
-SLIDESHOW = "slideshow"
-EXTRACT = "extract"
+MODEL_EVALUATION = "evaluate"
+SPLIT = "split"
 INDEX = "index"
 TRAIN = "train"
 REAL = "real"
 
-command_options = [GEAR_COLLECT, SLIDESHOW, EXTRACT, TRAIN]
+command_options = [GEAR_COLLECT, MODEL_EVALUATION, SPLIT, TRAIN, REAL]
 
 parser = argparse.ArgumentParser(description='Delegate to corresponding commands')
 parser.add_argument('-s', '--safe', action='store_true', default=False,
@@ -52,25 +52,25 @@ if command == GEAR_COLLECT:
     input("Press enter to confirm")
   gear_collector.run()
 
-elif command == SLIDESHOW:
+elif command == MODEL_EVALUATION:
   if arg.safe:
-    print("Starting slideshow in safe mode.")
-    slideshow = SlideShow()
+    print("Starting model evaluation in safe mode.")
+    model_evaluator = ModelEvaluator()
   else:
     print("Starting slideshow.")
-    slideshow = SlideShow()
-  slideshow.run(arg.command[1])
+    model_evaluator = ModelEvaluator()
+  model_evaluator.run(arg.command[1])
 
-elif command == EXTRACT:
+elif command == SPLIT:
   if arg.safe:
     print("Starting data extraction in safe mode.")
-    extract = Extract(SafeCv2())
+    image_split_collector = ImageSplitCollector(SafeCv2())
   else:
     print("""Starting data extraction.  This operation will change data on the disc.  This operation may overwite indexed
     data Making such data invalid""")
     input("Press enter to confirm")
-    extract = Extract()
-  extract.run(arg.command[1])
+    image_split_collector = ImageSplitCollector()
+  image_split_collector.run(arg.command[1])
 
 elif command == INDEX:
   if arg.safe:

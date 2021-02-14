@@ -5,10 +5,10 @@ import sys
 import pytesseract
 
 from api.safe_cv2 import SafeCv2
-from extract_gear.extract_image import ExtractImage
+from extract_gear.image_splitter import ImageSplitter
 from folder.folder import Folder
 
-class Extract:
+class ImageSplitCollector:
 
   def __init__(self, api_cv2=None):
     self.api_cv2 = api_cv2 if api_cv2 else SafeCv2()
@@ -23,22 +23,22 @@ class Extract:
       self.run_extract_set_data()
     else:
       # Delay expensive tensorflow import until necessary
-      from extract_gear.extract_real_data import ExtractRealData
+      from extract_gear.card_reader import CardReader
 
-      extract_real_data = ExtractRealData()
-      extract_real_data.run()
+      card_reader = CardReader()
+      card_reader.run()
 
 
   def run_extract_stat_data(self):
     num = 0
     files = sorted(os.listdir(Folder.PREPROCESS_FOLDER))
-    extract_image = ExtractImage()
+    image_splitter = ImageSplitter()
     for file_name in files:
       img = self.api_cv2.imread(Folder.PREPROCESS_FOLDER + file_name)
       print("Processing " + file_name)
       y = int(file_name[1])
       x = int(file_name[0])
-      images = extract_image.extract_stat_images(img, y, x)
+      images = image_splitter.extract_stat_images(img, y, x)
       i = 0
       for img in images:
         self.api_cv2.show_img(img)
@@ -56,13 +56,13 @@ class Extract:
   def run_extract_level_data(self):
     num = 0
     files = sorted(os.listdir(Folder.PREPROCESS_FOLDER))
-    extract_image = ExtractImage()
+    image_splitter = ImageSplitter()
     for file_name in files:
       img = self.api_cv2.imread(Folder.PREPROCESS_FOLDER + file_name)
       print("Processing " + file_name)
       y = int(file_name[1])
       x = int(file_name[0])
-      images = extract_image.extract_level_images(img, y, x)
+      images = image_splitter.extract_level_images(img, y, x)
       img = images[0]
       self.api_cv2.show_img(img)
       see_all = input("Save another image?  Enter any character to see the slideshow")
@@ -70,13 +70,13 @@ class Extract:
       if see_all != "":
         border_size = 3
 
-        img_total = np.full((ExtractImage.LEVEL_HEIGHT*5 + 5 * border_size, ExtractImage.LEVEL_WIDTH, 3),
+        img_total = np.full((ImageSplitter.LEVEL_HEIGHT*5 + 5 * border_size, ImageSplitter.LEVEL_WIDTH, 3),
           (255, 255, 255), dtype=np.uint8)
-        for y in range(ExtractImage.LEVEL_HEIGHT):
-          for x in range(ExtractImage.LEVEL_WIDTH):
+        for y in range(ImageSplitter.LEVEL_HEIGHT):
+          for x in range(ImageSplitter.LEVEL_WIDTH):
             i = 0
             for img in images:
-              img_total[border_size * i + y + i * ExtractImage.LEVEL_HEIGHT,x] = img[y, x]
+              img_total[border_size * i + y + i * ImageSplitter.LEVEL_HEIGHT,x] = img[y, x]
               i += 1
 
         self.api_cv2.show_img(img)
@@ -90,7 +90,7 @@ class Extract:
   def run_extract_set_data(self):
     num = 0
     files = sorted(os.listdir(Folder.PREPROCESS_FOLDER))
-    extract_image = ExtractImage()
+    extract_image = ImageSplitter()
     for file_name in files:
       img = self.api_cv2.imread(Folder.PREPROCESS_FOLDER + file_name)
       print("Processing %d of %d"  % (num + 1, len(files)))

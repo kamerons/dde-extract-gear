@@ -27,7 +27,7 @@ from folder.folder import Folder
 
 from train.train_stat_type import TrainStatType
 
-class ExtractRealData:
+class CardReader:
 
   SET_TYPES = ["Chain Armor Set", "Dark Lord's Set", "Dragon Slayer Set",
     "Goblin Raider Set", "Great Hero Set", "Leather Armor Set", "Knight Set", "Plate Armor Set"]
@@ -75,12 +75,12 @@ class ExtractRealData:
     guess = self.get_armor_type_guess(img, coord)
     highest = 0
     highest_type = ""
-    for armor_type in ExtractRealData.SET_TYPES:
+    for armor_type in CardReader.SET_TYPES:
       ratio = self.api_fuzzzywuzzy.ratio(armor_type.lower(), guess.lower())
       if ratio > highest:
         highest_type = armor_type
         highest = ratio
-    if highest >= ExtractRealData.MIN_LEVENSHTEIN:
+    if highest >= CardReader.MIN_LEVENSHTEIN:
       return highest_type
     return None
 

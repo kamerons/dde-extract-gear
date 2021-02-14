@@ -11,7 +11,7 @@ from extract_gear.preprocess_set import PreProcessSet
 from extract_gear.index import Index
 from folder.folder import Folder
 
-class SlideShow:
+class ModelEvaluator:
 
   def __init__(self, api_cv2=None):
     self.api_cv2 = api_cv2 if api_cv2 else SafeCv2()

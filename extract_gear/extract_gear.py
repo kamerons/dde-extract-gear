@@ -4,7 +4,7 @@ from api.safe_cv2 import SafeCv2
 from api.safe_json import SafeJson
 from api.safe_pyautogui import SafePyAutoGui
 
-from extract_gear.extract_real_data import ExtractRealData
+from extract_gear.card_reader import CardReader
 
 from folder.folder import Folder
 
@@ -19,7 +19,7 @@ class ExtractGear:
     self.api_pyautogui = api_pyautogui if api_pyautogui else SafePyAutoGui()
     self.api_json = api_json if api_json else SafeJson()
     self.api_time = api_time if api_time else ApiTime()
-    self.extract_real_data = ExtractRealData()
+    self.card_reader = CardReader()
 
 
   def countdown(self, x, printX):
@@ -35,7 +35,7 @@ class ExtractGear:
     start_col = int(self.api_builtin.input("enter the starting column, typically 3\n>"))
     for armor_type in ExtractGear.ARMOR_TYPES:
       self.api_builtin.input(
-        "Beginning colelction for %s.  Press enter when ready." % armor_type)
+        "Beginning collection for %s.  Press enter when ready." % armor_type)
       num_pages = int(self.api_builtin.input("enter the number of FULL pages\n>"))
       self.api_builtin.print("Beginning collection. you will have 10 seconds")
       self.countdown(10, True)
@@ -49,7 +49,7 @@ class ExtractGear:
             self.api_pyautogui.screenshot(name)
             print("COL %d ROW %d" % (column, row))
             img = self.api_cv2.imread(name)
-            data = self.extract_real_data.get_img_data(img, (row, column))
+            data = self.card_reader.get_img_data(img, (row, column))
             print(str(data))
             index.append(data)
             if row == 3 and column == 5:
