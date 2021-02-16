@@ -7,6 +7,7 @@ import train
 from extract_gear.class_repository import Configs, TaskProvider, Internal2
 from extract_gear.card_reader import CardReader
 from extract_gear.image_splitter import ImageSplitter
+from extract_gear.preprocess_factory import PreprocessFactory
 
 from test.util.test_util import Arg
 
@@ -26,6 +27,7 @@ class TestClassRepository(unittest.TestCase):
     self.assertEqual(type(card_reader.api_fuzzzywuzzy), api.api_fuzzywuzzy.ApiFuzzyWuzzy)
     self.assertEqual(type(card_reader.api_pytesseract), api.api_pytesseract.ApiPyTesseract)
     self.assertEqual(type(card_reader.api_tensorflow), api.api_tensorflow.ApiTensorflow)
+    self.assertEqual(type(card_reader.preprocess_factory), PreprocessFactory)
 
 
   def test_imageSplitTask(self):
@@ -42,6 +44,7 @@ class TestClassRepository(unittest.TestCase):
     self.assertEqual(type(model_evaluator_task.api_builtin), api.api_builtin.ApiBuiltIn)
     self.assertEqual(type(model_evaluator_task.api_cv2), api.api_cv2.ApiCv2)
     self.assertEqual(type(model_evaluator_task.api_pytesseract), api.api_pytesseract.ApiPyTesseract)
+    self.assertEqual(type(model_evaluator_task.preprocess_factory), PreprocessFactory)
 
 
   def test_collectGearTask(self):

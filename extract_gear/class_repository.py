@@ -18,6 +18,7 @@ from extract_gear.image_split_collector import ImageSplitCollector
 from extract_gear.image_splitter import ImageSplitter
 from extract_gear.index import Index
 from extract_gear.model_evaluator import ModelEvaluator
+from extract_gear.preprocess_factory import PreprocessFactory
 
 from train.train_stat_type import TrainStatType
 from train.train_stat_value import TrainStatValue
@@ -44,18 +45,20 @@ class Api2(containers.DeclarativeContainer):
 
 class Internal1(containers.DeclarativeContainer):
   image_splitter = providers.Singleton(ImageSplitter)
+  preprocess_factory = providers.Singleton(PreprocessFactory)
 
 
 class Internal2(containers.DeclarativeContainer):
-  card_reader = providers.Singleton(CardReader, Internal1.image_splitter, Api2.api_cv2,
-    Api1.api_fuzzywuzzy, Api1.api_pytesseract, Api1.api_tensorflow)
+  card_reader = providers.Singleton(CardReader, Internal1.image_splitter,
+    Internal1.preprocess_factory, Api2.api_cv2, Api1.api_fuzzywuzzy,
+    Api1.api_pytesseract, Api1.api_tensorflow)
 
 
 class TaskProvider(containers.DeclarativeContainer):
   image_split_task = providers.Singleton(ImageSplitCollector, Configs.config, Api1.api_builtin,
     Api2.api_cv2, Internal1.image_splitter)
   model_evaluator_task = providers.Singleton(ModelEvaluator, Configs.config, Api1.api_builtin,
-    Api2.api_cv2, Api1.api_pytesseract)
+    Api2.api_cv2, Api1.api_pytesseract, Internal1.preprocess_factory)
   collect_gear_task = providers.Singleton(CollectGearTask, Api1.api_builtin, Api2.api_pyautogui,
     Api1.api_time)
   index_task = providers.Singleton(Index, Configs.config, Api1.api_builtin, Api1.api_curses,

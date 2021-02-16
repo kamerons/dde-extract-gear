@@ -3,19 +3,17 @@ import numpy as np
 import os
 import sys
 
-from extract_gear.preprocess_stat import PreProcessStat
-from extract_gear.preprocess_level import PreProcessLevel
-from extract_gear.preprocess_set import PreProcessSet
 from extract_gear.index import Index
 from folder.folder import Folder
 
 class ModelEvaluator:
 
-  def __init__(self, args, api_builtin, api_cv2, api_pytesseract):
+  def __init__(self, args, api_builtin, api_cv2, api_pytesseract, preprocess_factory):
     self.api_builtin = api_builtin
     self.api_cv2 = api_cv2
     self.sub_task = args.command[1]
     self.api_pytesseract = api_pytesseract
+    self.preprocess_factory = preprocess_factory
 
 
   def run(self):
@@ -48,7 +46,7 @@ class ModelEvaluator:
   def run_confirm_level(self):
     for file_name in os.listdir(Folder.LEVEL_CROP_FOLDER):
       img = self.api_cv2.imread(Folder.LEVEL_CROP_FOLDER + file_name)
-      preprocessor = PreProcessLevel(img)
+      preprocessor = self.preprocess_factory.get_level_preprocessor(img)
       img = preprocessor.process_level()
       guess = self.api_pytesseract.image_to_string(img).strip()
       self.api_builtin.print("The guess for this file was: %s" % guess)
@@ -58,7 +56,7 @@ class ModelEvaluator:
   def run_confirm_set(self):
     for file_name in os.listdir(Folder.SET_CROP_FOLDER):
       img = self.api_cv2.imread(Folder.SET_CROP_FOLDER + file_name)
-      preprocessor = PreProcessSet(img)
+      preprocessor = self.preprocess_factory.get_set_preprocessor(img)
       img = preprocessor.process_set()
       guess = self.api_pytesseract.image_to_string(img).strip()
       self.api_builtin.print("The guess for this file was: %s" % guess)
@@ -70,7 +68,7 @@ class ModelEvaluator:
       if data[Index.STAT_TYPE_KEY] == Index.NONE:
         continue
       img = self.api_cv2.imread(Folder.STAT_CROP_FOLDER + data[Index.FILE_NAME_KEY])
-      preprocessor = PreProcessStat(img)
+      preprocessor = self.preprocess_factory.get_stat_preprocessor(img)
       img = preprocessor.process_stat()
       guess = self.api_pytesseract.image_to_string(img).strip()
       guess = "".join(e for e in guess if e.isalnum())
@@ -87,7 +85,7 @@ class ModelEvaluator:
   def slideshow_failed(self, failed):
     for failure in failed:
       img = self.api_cv2.imread(Folder.STAT_CROP_FOLDER + failure[Index.FILE_NAME_KEY])
-      preprocessor = PreProcessStat(np.array(img, copy=True))
+      preprocessor = self.preprocess_factory.get_stat_preprocessor(np.array(img, copy=True))
       img2 = preprocessor.process_stat()
       img3 = np.full((56,56*2, 3), (0, 0, 0), dtype=np.uint8)
 

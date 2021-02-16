@@ -1,13 +1,8 @@
 import os
 import numpy as np
 
-from extract_gear.preprocess_set import PreProcessSet
-from extract_gear.preprocess_stat import PreProcessStat
-from extract_gear.image_splitter import ImageSplitter
 from extract_gear.index import Index
-
 from folder.folder import Folder
-
 from train.train_stat_type import TrainStatType
 
 class CardReader:
@@ -18,19 +13,20 @@ class CardReader:
   MIN_LEVENSHTEIN = 65
 
 
-  def __init__(self, image_splitter, api_cv2, api_fuzzzywuzzy, api_pytesseract, api_tensorflow):
+  def __init__(self, image_splitter, preprocess_factory, api_cv2, api_fuzzzywuzzy, api_pytesseract, api_tensorflow):
     self.api_cv2 = api_cv2
     self.api_fuzzzywuzzy = api_fuzzzywuzzy
     self.api_pytesseract = api_pytesseract
     self.image_splitter = image_splitter
     self.api_tensorflow = api_tensorflow
+    self.preprocess_factory = preprocess_factory
 
     self.stat_type_model = None
     self.stat_value_model = None
+    self.initialized = False
 
 
   def run(self):
-    self.lazy_init()
     files = sorted(os.listdir(Folder.PREPROCESS_FOLDER))
     for file_name in files:
       print("File name: %s" % file_name)
@@ -46,6 +42,8 @@ class CardReader:
 
 
   def get_img_data(self, img, coord):
+    if not self.initialized:
+      self.lazy_init
     armor_type = self.get_armor_type(img, coord)
     stats = self.get_stat_types(img, coord)
     max_level = 16
@@ -72,7 +70,7 @@ class CardReader:
 
   def get_armor_type_guess(self, img, coord):
     img = self.image_splitter.extract_set_image(img, coord)
-    set_processor = PreProcessSet(img)
+    set_processor = self.preprocess_factory.get_set_preprocessor(img)
     processed_img = set_processor.process_set()
     guess = self.api_pytesseract.image_to_string(processed_img).strip()
     return guess
@@ -92,7 +90,7 @@ class CardReader:
 
 
   def get_stat_num(self, img):
-    preprocessor = PreProcessStat(img)
+    preprocessor = self.preprocess_factory.get_stat_preprocessor(img)
     self.api_cv2.show_img(img)
     preprocessor.process_stat()
     for i in preprocessor.digits:
@@ -127,3 +125,4 @@ class CardReader:
     self.api_pytesseract.initialize_pytesseract()
     self.stat_type_model = self.api_tensorflow.load_model(Folder.STAT_TYPE_MODEL_FOLDER)
     self.stat_value_model = self.api_tensorflow.load_model(Folder.STAT_VALUE_MODEL_FOLDER)
+    self.initialized = True
