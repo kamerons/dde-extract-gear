@@ -2,6 +2,10 @@ from folder.folder import Folder
 
 class CollectGearTask:
 
+  MAX_GEAR = 1000
+  NUM_ROWS = 3
+  NUM_COLUMNS = 5
+
   def __init__(self, api_builtin, api_pyautogui, api_time):
     self.api_builtin = api_builtin
     self.api_pyautogui = api_pyautogui
@@ -22,9 +26,9 @@ class CollectGearTask:
     self.countdown(10, True)
     i = 0
     #at most 1000 pieces of gear
-    while i < 1000:
-      for row in range(1, 4):
-        for column in range(1, 6):
+    while i < CollectGearTask.MAX_GEAR:
+      for row in range(1, CollectGearTask.NUM_ROWS + 1):
+        for column in range(1, CollectGearTask.NUM_COLUMNS + 1):
           name = '%s%d%d_%03d.png' % (Folder.PREPROCESS_FOLDER, column, row, i)
           self.api_pyautogui.screenshot(name)
           self.api_builtin.print("Took screenshot: %s" % name)
@@ -34,5 +38,5 @@ class CollectGearTask:
           else:
             self.countdown(4, False)
           i += 1
-          if i == 1000:
+          if i == CollectGearTask.MAX_GEAR:
             return

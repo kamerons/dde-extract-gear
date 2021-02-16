@@ -3,6 +3,7 @@ import numpy as np
 
 from extract_gear.preprocess_set import PreProcessSet
 from extract_gear.preprocess_stat import PreProcessStat
+from extract_gear.image_splitter import ImageSplitter
 from extract_gear.index import Index
 
 from folder.folder import Folder
@@ -46,7 +47,6 @@ class CardReader:
 
   def get_img_data(self, img, coord):
     armor_type = self.get_armor_type(img, coord)
-    #self.api_cv2.show_img(self.extract_image.extract_stat_card(img, coord))
     stats = self.get_stat_types(img, coord)
     max_level = 16
     current_level = 1
