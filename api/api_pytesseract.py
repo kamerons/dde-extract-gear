@@ -1,6 +1,5 @@
-import pytesseract
-
 class ApiPyTesseract:
 
-  def image_to_string(self, img):
-    return pytesseract.image_to_string(img)
+  def initialize_pytesseract(self):
+    from pytesseract import image_to_string as its
+    self.image_to_string = its

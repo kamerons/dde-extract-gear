@@ -1,12 +1,11 @@
-from api.api_time import ApiTime
 from folder.folder import Folder
 
-class GearCollecter:
+class CollectGearTask:
 
-  def __init__(self, api_builtin, api_pyautogui, api_time=None):
+  def __init__(self, api_builtin, api_pyautogui, api_time):
     self.api_builtin = api_builtin
     self.api_pyautogui = api_pyautogui
-    self.api_time = api_time if api_time else ApiTime()
+    self.api_time = api_time
 
 
   def countdown(self, x, printX):

@@ -1,5 +1,3 @@
-from api.api_curses import ApiCurses
-
 class Cli:
 
   RED = 203
@@ -8,8 +6,8 @@ class Cli:
   BROWN = 179
 
 
-  def __init__(self, stdscr, options, api_curses=None):
-    self.api_curses = api_curses if api_curses else ApiCurses()
+  def __init__(self, stdscr, options, api_curses):
+    self.api_curses = api_curses
     self.options = options
     self.buffer = ""
     self.stdscr = stdscr

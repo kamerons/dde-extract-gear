@@ -1,41 +1,32 @@
-import tensorflow as tf
-config = tf.compat.v1.ConfigProto()
-config.gpu_options.allow_growth = True
-tf.compat.v1.keras.backend.set_session(tf.compat.v1.Session(config=config))
-
-import tensorflow.keras
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense, Conv2D, MaxPool2D, Flatten, Dropout
-from tensorflow.keras.preprocessing.image import ImageDataGenerator
-from tensorflow.keras.optimizers import Adam
-
-from sklearn.metrics import classification_report,confusion_matrix
-
 import os
 import numpy as np
 import sys
 
-from api.safe_builtin import SafeBuiltIn
-from api.safe_cv2 import SafeCv2
-from api.safe_json import SafeJson
-from api.api_random import ApiRandom
-
 from extract_gear.index import Index
-from extract_gear.image_splitter import ImageSplitter, STAT_DATA
+from extract_gear.image_splitter import ImageSplitter
 from extract_gear.preprocess_stat import PreProcessStat
 from folder.folder import Folder
 
 class TrainStatValue:
 
-  def __init__(self, safe):
-    self.api_builtin = SafeBuiltIn()
-    self.api_cv2 = SafeCv2()
-    self.api_json = SafeJson()
-    self.api_random = ApiRandom()
-    self.safe = safe
+  LEARN_RATE = .0000005
+  NUM_EPOCHS = 4000
+
+
+  def __init__(self, args, api_builtin, api_cv2, api_json, api_random, api_tensorflow):
+    self.api_builtin = api_builtin
+    self.api_cv2 = api_cv2
+    self.api_json = api_json
+    self.api_random = api_random
+    self.safe = args.safe
+    self.api_builtin.safe = True
+    self.api_cv2.safe = True
+    self.api_json.safe = True
+    self.api_tensorflow = api_tensorflow
 
 
   def train(self):
+    self.api_tensorflow.initialize_tensorflow()
     with self.api_builtin.open(Folder.INDEX_FILE, "r") as fp:
       index = self.api_json.load(fp)
       train, test = self.split_index(.7, index)
@@ -43,7 +34,7 @@ class TrainStatValue:
       x_train, y_train = TrainStatValue.get_preprocess(train)
       x_test, y_test = TrainStatValue.get_preprocess(test)
 
-      datagen = ImageDataGenerator(
+      datagen = self.api_tensorflow.ImageDataGenerator(
         featurewise_center=False,
         samplewise_center=False,
         featurewise_std_normalization=False,
@@ -60,13 +51,14 @@ class TrainStatValue:
       model = self.get_model()
       model.summary(print_fn=self.api_builtin.print)
 
-      opt = Adam(lr=0.0000005)
-      model.compile(optimizer=opt, loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
+      opt = self.api_tensorflow.Adam(lr=0.0000005)
+      model.compile(optimizer=opt, loss=self.api_tensorflow.SparseCategoricalCrossentropy(from_logits=True),
         metrics=['accuracy'])
       model.fit(x_train, y_train, epochs=4000, validation_data=(x_test, y_test))
       predictions = model.predict_classes(x_test)
       predictions = predictions.reshape(1,-1)[0]
-      self.api_builtin.print(classification_report(y_test, predictions, target_names=["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]))
+      self.api_builtin.print(self.api_tensorflow.classification_report(y_test, predictions,
+        target_names=["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]))
       if not self.safe:
         model.save(Folder.STAT_VALUE_MODEL_FOLDER)
       else:
@@ -81,27 +73,27 @@ class TrainStatValue:
       y.append(label)
 
     x = np.array(x) / 255
-    x.reshape(-1, STAT_DATA.size[0], STAT_DATA.size[1], 1)
+    x.reshape(-1, ImageSplitter.STAT_DATA.size[0], ImageSplitter.STAT_DATA.size[1], 1)
     y = np.array(y)
     return (x, y)
 
 
   def get_model(self):
-    model = Sequential()
-    model.add(Conv2D(32,3,padding="same", activation="relu",
-      input_shape=(STAT_DATA.size[0], STAT_DATA.size[1], 3)))
-    model.add(MaxPool2D())
+    model = self.api_tensorflow.Sequential()
+    model.add(self.api_tensorflow.Conv2D(32,3,padding="same", activation="relu",
+      input_shape=(ImageSplitter.STAT_DATA.size[0], ImageSplitter.STAT_DATA.size[1], 3)))
+    model.add(self.api_tensorflow.MaxPool2D())
 
-    model.add(Conv2D(32, 3, padding="same", activation="relu"))
-    model.add(MaxPool2D())
+    model.add(self.api_tensorflow.Conv2D(32, 3, padding="same", activation="relu"))
+    model.add(self.api_tensorflow.MaxPool2D())
 
-    model.add(Conv2D(64, 3, padding="same", activation="relu"))
-    model.add(MaxPool2D())
-    model.add(Dropout(0.4))
+    model.add(self.api_tensorflow.Conv2D(64, 3, padding="same", activation="relu"))
+    model.add(self.api_tensorflow.MaxPool2D())
+    model.add(self.api_tensorflow.Dropout(0.4))
 
-    model.add(Flatten())
-    model.add(Dense(128,activation="relu"))
-    model.add(Dense(10))
+    model.add(self.api_tensorflow.Flatten())
+    model.add(self.api_tensorflow.Dense(128,activation="relu"))
+    model.add(self.api_tensorflow.Dense(10))
     return model
 
 

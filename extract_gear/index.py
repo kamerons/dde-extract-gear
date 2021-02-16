@@ -1,14 +1,6 @@
 import os
 from datetime import datetime
 
-from api.safe_builtin import SafeBuiltIn
-from api.safe_cv2 import SafeCv2
-from api.safe_json import SafeJson
-
-from api.api_curses import ApiCurses
-from api.api_cv2 import ApiCv2
-from api.api_json import ApiJson
-from api.api_time import ApiTime
 from extract_gear.cli import Cli
 from folder.folder import Folder
 
@@ -32,15 +24,14 @@ class Index:
   FILE_NAME_KEY = "file_name"
   STAT_VALUE_KEY = "num"
 
-  def __init__(self, file, api_builtin=None, api_curses=None, api_cv2=None, api_json=None, api_time=None):
-    self.api_builtin = api_builtin if api_builtin else SafeBuiltIn()
-    self.api_cv2 = api_cv2 if api_cv2 else SafeCv2()
-    self.api_json = api_json if api_json else SafeJson()
+  def __init__(self, args, api_builtin, api_curses, api_cv2, api_json, api_time):
+    self.api_builtin = api_builtin
+    self.api_cv2 = api_cv2
+    self.api_curses = api_curses
+    self.api_json = api_json
+    self.api_time = api_time
 
-    self.api_curses = api_curses if api_curses else ApiCurses()
-    self.api_time = api_time if api_time else ApiTime()
-
-    self.file = file
+    self.file = args.file
     self.img = []
     self.data_index = []
     self.stage = 0
@@ -48,7 +39,7 @@ class Index:
     self.idx = 0
 
 
-  def run_index_creation(self):
+  def run(self):
     self.api_curses.wrapper(self.main_loop)
 
 

@@ -1,9 +1,3 @@
-from api.api_time import ApiTime
-from api.safe_builtin import SafeBuiltIn
-from api.safe_cv2 import SafeCv2
-from api.safe_json import SafeJson
-from api.safe_pyautogui import SafePyAutoGui
-
 from extract_gear.card_reader import CardReader
 
 from folder.folder import Folder
@@ -13,13 +7,13 @@ class ExtractGear:
   ARMOR_TYPES = ["shoulder_pad", "mask", "hat", "greaves", "shield", "bracer", "belt"]
 
 
-  def __init__(self, api_builtin, api_cv2=None, api_pyautogui=None, api_json=None, api_time=None):
-    self.api_builtin = api_builtin if api_builtin else SafeBuiltIn()
-    self.api_cv2 = api_cv2 if api_cv2 else SafeCv2()
-    self.api_pyautogui = api_pyautogui if api_pyautogui else SafePyAutoGui()
-    self.api_json = api_json if api_json else SafeJson()
-    self.api_time = api_time if api_time else ApiTime()
-    self.card_reader = CardReader()
+  def __init__(self, api_builtin, api_cv2, api_pyautogui, api_json, api_time, card_reader):
+    self.api_builtin = api_builtin
+    self.api_cv2 = api_cv2
+    self.api_pyautogui = api_pyautogui
+    self.api_json = api_json
+    self.api_time = api_time
+    self.card_reader = card_reader
 
 
   def countdown(self, x, printX):

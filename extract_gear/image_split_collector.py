@@ -2,44 +2,47 @@ from fuzzywuzzy import fuzz
 import numpy as np
 import os
 import sys
-import pytesseract
 
-from api.safe_cv2 import SafeCv2
 from extract_gear.image_splitter import ImageSplitter
 from folder.folder import Folder
 
 class ImageSplitCollector:
 
-  def __init__(self, api_cv2=None):
-    self.api_cv2 = api_cv2 if api_cv2 else SafeCv2()
+  def __init__(self, args, api_builtin, api_cv2, image_splitter):
+    self.api_builtin = api_builtin
+    self.api_cv2 = api_cv2
+    self.sub_task = args.command[1]
+    self.image_splitter = image_splitter
 
 
-  def run(self, method):
-    if method == 'stat':
+  def run(self):
+    if self.sub_task == 'stat':
       self.run_extract_stat_data()
-    elif method == 'level':
+    elif self.sub_task == 'level':
       self.run_extract_level_data()
-    elif method == 'set':
+    elif self.sub_task == 'set':
       self.run_extract_set_data()
-    elif method == 'card':
+    elif self.sub_task == 'card':
       self.run_extract_card_data()
-    else:
+    elif self.sub_task == 'real':
       # Delay expensive tensorflow import until necessary
       from extract_gear.card_reader import CardReader
 
       card_reader = CardReader()
       card_reader.run()
+    else:
+      self.api_builtin.print("Failed to recognize sub-task")
+      self.api_builtin.exit()
 
 
   def run_extract_stat_data(self):
     num = 0
     files = sorted(os.listdir(Folder.PREPROCESS_FOLDER))
-    image_splitter = ImageSplitter()
     for file_name in files:
       img = self.api_cv2.imread(Folder.PREPROCESS_FOLDER + file_name)
       print("Processing " + file_name)
       gear_coord = int(file_name[1]), int(file_name[0])
-      images = image_splitter.extract_stat_images(img, gear_coord)
+      images = self.image_splitter.extract_stat_images(img, gear_coord)
       i = 0
       for img in images:
         self.api_cv2.show_img(img)
@@ -57,12 +60,11 @@ class ImageSplitCollector:
   def run_extract_level_data(self):
     num = 0
     files = sorted(os.listdir(Folder.PREPROCESS_FOLDER))
-    image_splitter = ImageSplitter()
     for file_name in files:
       img = self.api_cv2.imread(Folder.PREPROCESS_FOLDER + file_name)
       print("Processing " + file_name)
       gear_coord = int(file_name[1]), int(file_name[0])
-      images = image_splitter.extract_level_images(img, gear_coord)
+      images = self.image_splitter.extract_level_images(img, gear_coord)
       img = images[0]
       self.api_cv2.show_img(img)
       see_all = input("Save another image?  Enter any character to see the slideshow")
@@ -90,12 +92,11 @@ class ImageSplitCollector:
   def run_extract_set_data(self):
     num = 0
     files = sorted(os.listdir(Folder.PREPROCESS_FOLDER))
-    extract_image = ImageSplitter()
     for file_name in files:
       img = self.api_cv2.imread(Folder.PREPROCESS_FOLDER + file_name)
       print("Processing %d of %d"  % (num + 1, len(files)))
       gear_coord = int(file_name[1]), int(file_name[0])
-      img = extract_image.extract_set_image(img, gear_coord)
+      img = self.image_splitter.extract_set_image(img, gear_coord)
       self.api_cv2.show_img(img)
       self.api_cv2.imwrite('%s%03d.png' % (Folder.SET_CROP_FOLDER, num), img)
       num += 1
@@ -104,12 +105,11 @@ class ImageSplitCollector:
   def run_extract_card_data(self):
     num = 0
     files = sorted(os.listdir(Folder.PREPROCESS_FOLDER))
-    extract_image = ImageSplitter()
     for file_name in files:
       img = self.api_cv2.imread(Folder.PREPROCESS_FOLDER + file_name)
       print("Processing %d of %d"  % (num + 1, len(files)))
       gear_coord = int(file_name[1]), int(file_name[0])
-      img = extract_image.extract_stat_card(img, gear_coord)
+      img = self.image_splitter.extract_stat_card(img, gear_coord)
       print(str(img.shape))
       self.api_cv2.show_img(img)
       self.api_cv2.imwrite('%s%03d.png' % (Folder.SET_CROP_FOLDER, num), img)

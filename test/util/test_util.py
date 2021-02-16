@@ -8,3 +8,12 @@ class TestUtil:
   def restore_class_attributes(clz, attributes):
     for attribute_name, attribute_value in attributes:
       setattr(clz, attribute_name, attribute_value)
+
+
+class Arg:
+
+  def __init__(self, quiet=True, safe=True, command=[], file=""):
+    self.quiet = quiet
+    self.safe = safe
+    self.command = command
+    self.file = file

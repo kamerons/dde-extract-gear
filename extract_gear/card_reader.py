@@ -1,24 +1,6 @@
 import os
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-
-import tensorflow as tf
-config = tf.compat.v1.ConfigProto()
-config.gpu_options.allow_growth = True
-tf.compat.v1.keras.backend.set_session(tf.compat.v1.Session(config=config))
-
-import tensorflow.keras
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense, Conv2D, MaxPool2D, Flatten, Dropout
-from tensorflow.keras.preprocessing.image import ImageDataGenerator
-from tensorflow.keras.optimizers import Adam
-
 import numpy as np
 
-from api.api_fuzzywuzzy import ApiFuzzyWuzzy
-from api.api_pytesseract import ApiPyTesseract
-from api.safe_cv2 import SafeCv2
-
-from extract_gear.image_splitter import ImageSplitter
 from extract_gear.preprocess_set import PreProcessSet
 from extract_gear.preprocess_stat import PreProcessStat
 from extract_gear.index import Index
@@ -35,16 +17,19 @@ class CardReader:
   MIN_LEVENSHTEIN = 65
 
 
-  def __init__(self, image_splitter=None, api_cv2=None, api_fuzzzywuzzy=None, api_pytesseract=None):
-    self.api_cv2 = api_cv2 if api_cv2 else SafeCv2()
-    self.api_fuzzzywuzzy = api_fuzzzywuzzy if api_fuzzzywuzzy else ApiFuzzyWuzzy()
-    self.api_pytesseract = api_pytesseract if api_pytesseract else ApiPyTesseract()
-    self.image_splitter = image_splitter if image_splitter else ImageSplitter()
-    self.stat_type_model = tensorflow.keras.models.load_model(Folder.STAT_TYPE_MODEL_FOLDER)
-    self.stat_value_model = tensorflow.keras.models.load_model(Folder.STAT_VALUE_MODEL_FOLDER)
+  def __init__(self, image_splitter, api_cv2, api_fuzzzywuzzy, api_pytesseract, api_tensorflow):
+    self.api_cv2 = api_cv2
+    self.api_fuzzzywuzzy = api_fuzzzywuzzy
+    self.api_pytesseract = api_pytesseract
+    self.image_splitter = image_splitter
+    self.api_tensorflow = api_tensorflow
+
+    self.stat_type_model = None
+    self.stat_value_model = None
 
 
   def run(self):
+    self.lazy_init()
     files = sorted(os.listdir(Folder.PREPROCESS_FOLDER))
     for file_name in files:
       print("File name: %s" % file_name)
@@ -56,7 +41,7 @@ class CardReader:
         for x in range(copy.shape[1]):
           copy[y,x] = card[y,x]
       print(self.get_img_data(img, coord))
-      #self.api_cv2.show_img(copy)
+      self.api_cv2.show_img(copy)
 
 
   def get_img_data(self, img, coord):
@@ -100,8 +85,7 @@ class CardReader:
     stats = {}
     for i in range(14):
       prediction = predictions[i]
-      print(Index.STAT_OPTIONS[prediction])
-      #self.api_cv2.show_img(processed_images[i])
+      self.api_cv2.show_img(processed_images[i])
       if Index.STAT_OPTIONS[prediction] != Index.NONE:
         stats[Index.STAT_OPTIONS[prediction]] = self.get_stat_num(images[i])
     return stats
@@ -109,10 +93,10 @@ class CardReader:
 
   def get_stat_num(self, img):
     preprocessor = PreProcessStat(img)
-    #self.api_cv2.show_img(img)
+    self.api_cv2.show_img(img)
     preprocessor.process_stat()
-    #for i in preprocessor.digits:
-    #  self.api_cv2.show_img(i)
+    for i in preprocessor.digits:
+      self.api_cv2.show_img(i)
     digits = []
     for digit_image in preprocessor.digits:
       digits.append(digit_image)
@@ -134,3 +118,12 @@ class CardReader:
     x = np.array(x) / 255
     x.reshape(-1, ImageSplitter.STAT_DATA.size[0], ImageSplitter.STAT_DATA.size[1], 1)
     return x
+
+
+  # Delay the following operations.  We don't want our dependents to wait for these operations to complete
+  # during test code, so we delay to here.
+  def lazy_init(self):
+    self.api_tensorflow.initialize_tensorflow()
+    self.api_pytesseract.initialize_pytesseract()
+    self.stat_type_model = self.api_tensorflow.load_model(Folder.STAT_TYPE_MODEL_FOLDER)
+    self.stat_value_model = self.api_tensorflow.load_model(Folder.STAT_VALUE_MODEL_FOLDER)

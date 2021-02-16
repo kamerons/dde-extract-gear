@@ -13,6 +13,7 @@ class ImageSplitter:
   STAT_DATA = ImageTypeData((56,56), (0,0), 3, 6, lambda col, row: col >= 4 and row != 1, (87,60))
   LEVEL_DATA = ImageTypeData((30,70), (268,180), 2, 3, lambda col, row: row == 0 and col == 2, (-88,60))
 
+
   def extract_stat_card(self, img, gear_coord):
     return self.get_single_image_split(img, gear_coord, ImageSplitter.CARD_DATA)
 
