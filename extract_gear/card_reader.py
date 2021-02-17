@@ -2,6 +2,7 @@ import os
 import numpy as np
 
 from extract_gear.index import Index
+from extract_gear.image_splitter import ImageSplitter
 from folder.folder import Folder
 from train.train_stat_type import TrainStatType
 
@@ -38,19 +39,18 @@ class CardReader:
         for x in range(copy.shape[1]):
           copy[y,x] = card[y,x]
       print(self.get_img_data(img, coord))
-      self.api_cv2.show_img(copy)
 
 
   def get_img_data(self, img, coord):
     if not self.initialized:
-      self.lazy_init
+      self.lazy_init()
     armor_type = self.get_armor_type(img, coord)
     stats = self.get_stat_types(img, coord)
     max_level = 16
     current_level = 1
     data = {'armor_set': armor_type, 'current_level': current_level, 'max_level': max_level}
     for stat_key in stats:
-      data[stat_key] = stats[stat_key]
+      data[stat_key] = int(stats[stat_key])
     return data
 
 
@@ -83,18 +83,18 @@ class CardReader:
     stats = {}
     for i in range(14):
       prediction = predictions[i]
-      self.api_cv2.show_img(processed_images[i])
       if Index.STAT_OPTIONS[prediction] != Index.NONE:
-        stats[Index.STAT_OPTIONS[prediction]] = self.get_stat_num(images[i])
+        stat_num = self.get_stat_num(images[i])
+        if stat_num != "NONE":
+          stats[Index.STAT_OPTIONS[prediction]] = stat_num
     return stats
 
 
   def get_stat_num(self, img):
     preprocessor = self.preprocess_factory.get_stat_preprocessor(img)
-    self.api_cv2.show_img(img)
     preprocessor.process_stat()
-    for i in preprocessor.digits:
-      self.api_cv2.show_img(i)
+    if (len(preprocessor.digits) == 0):
+      return "NONE"
     digits = []
     for digit_image in preprocessor.digits:
       digits.append(digit_image)

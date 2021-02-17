@@ -24,9 +24,32 @@ class ModelEvaluator:
       self.run_confirm_level()
     elif self.sub_task == 'set':
       self.run_confirm_set()
+    elif self.sub_task == 'none':
+      self.run_preprocess_none()
     else:
       self.api_builtin.print("Falied to recognize subtask")
       self.api_builtin.exit()
+
+
+  def run_preprocess_none(self):
+    index = []
+    with self.api_builtin.open(Folder.STAT_SAVE_FOLDER + "correction-complete09-02-2021_02-57-04-index.json", "r") as fp:
+      index = json.load(fp)
+
+    for data in index:
+      if data[Index.STAT_TYPE_KEY] != Index.NONE:
+        continue
+      img = self.api_cv2.imread(Folder.STAT_CROP_FOLDER + data[Index.FILE_NAME_KEY])
+      preprocessor = self.preprocess_factory.get_stat_preprocessor(np.array(img, copy=True))
+      img2 = preprocessor.process_stat()
+      img3 = np.full((56,56*2, 3), (0, 0, 0), dtype=np.uint8)
+
+      self.api_builtin.print(len(preprocessor.digits))
+      for y in range(56):
+        for x in range(56):
+          img3[y,x] = img[y,x]
+          img3[y,x+56] = img2[y,x]
+      self.api_cv2.show_img(img3)
 
 
   def run_confirm_stat(self):
