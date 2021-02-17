@@ -27,6 +27,7 @@ class ExtractGear:
   def run(self):
     row_index = RowIndex(self.api_builtin)
     failed = []
+    index = []
     for armor_type in ExtractGear.ARMOR_TYPES:
       self.api_builtin.input(
         "Beginning collection for %s.  Press enter when ready." % armor_type)
@@ -34,7 +35,6 @@ class ExtractGear:
       row_index.reset_for_new_type()
       self.api_builtin.print("Beginning collection. you will have 10 seconds")
       self.countdown(10, True)
-      index = []
       for page in range(1, row_index.num_pages + 1):
         if page == row_index.num_pages:
           row_index.update_row_index_for_last_page()
@@ -49,7 +49,7 @@ class ExtractGear:
           for column in range(row_index.cur_start_col, end_col + 1):
             self.add_data_to_index(column, row, page, index, armor_type, failed)
             if row != row_index.end_row or column != row_index.end_col:
-              self.countdown(3, False)
+              self.countdown(2.5, False)
           row_index.cur_start_col = 1
       with self.api_builtin.open(Folder.COLLECT_FILE, "w") as fp:
         self.api_builtin.print("Saving progress to disc")
@@ -59,6 +59,7 @@ class ExtractGear:
 
   def add_data_to_index(self, column, row, page, index, armor_type, failed):
       return self.recursive_add_to_index(0, column, row, page, index, armor_type, failed)
+
 
   def recursive_add_to_index(self, depth, column, row, page, index, armor_type, failed):
     name = '%s%d%d.png' % (Folder.TMP_FOLDER, column, row)
@@ -72,7 +73,7 @@ class ExtractGear:
       return
     elif not 'base' in data:
       self.api_builtin.print("Failed to read. Re-trying")
-      self.countdown(3, False)
+      self.countdown(2.5, False)
       return self.recursive_add_to_index(depth + 1, column, row, page, index, armor_type, failed)
     data['row'] = row
     data['column'] = column
