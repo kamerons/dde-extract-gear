@@ -8,12 +8,13 @@ from folder.folder import Folder
 
 class ModelEvaluator:
 
-  def __init__(self, args, api_builtin, api_cv2, api_pytesseract, preprocess_factory):
+  def __init__(self, args, api_builtin, api_cv2, api_pytesseract, preprocess_factory, card_reader):
     self.api_builtin = api_builtin
     self.api_cv2 = api_cv2
     self.sub_task = args.command[1]
     self.api_pytesseract = api_pytesseract
     self.preprocess_factory = preprocess_factory
+    self.card_reader = card_reader
 
 
   def run(self):
@@ -26,6 +27,8 @@ class ModelEvaluator:
       self.run_confirm_set()
     elif self.sub_task == 'none':
       self.run_preprocess_none()
+    elif self.sub_task == 'card':
+      self.card_reader.run()
     else:
       self.api_builtin.print("Falied to recognize subtask")
       self.api_builtin.exit()

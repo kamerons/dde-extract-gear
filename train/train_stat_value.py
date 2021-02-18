@@ -13,7 +13,7 @@ class TrainStatValue:
   NUM_EPOCHS = 4000
 
 
-  def __init__(self, args, api_builtin, api_cv2, api_json, api_random, api_tensorflow):
+  def __init__(self, args, api_builtin, api_cv2, api_json, api_random, api_tensorflow, image_scaler):
     self.api_builtin = api_builtin
     self.api_cv2 = api_cv2
     self.api_json = api_json
@@ -23,6 +23,7 @@ class TrainStatValue:
     self.api_cv2.safe = True
     self.api_json.safe = True
     self.api_tensorflow = api_tensorflow
+    self.image_scaler = image_scaler
 
 
   def train(self):
@@ -31,8 +32,8 @@ class TrainStatValue:
       index = self.api_json.load(fp)
       train, test = self.split_index(.7, index)
 
-      x_train, y_train = TrainStatValue.get_preprocess(train)
-      x_test, y_test = TrainStatValue.get_preprocess(test)
+      x_train, y_train = self.image_scaler.prepare_for_classification(train)
+      x_test, y_test = self.image_scaler.prepare_for_classification(test)
 
       datagen = self.api_tensorflow.ImageDataGenerator(
         featurewise_center=False,
@@ -63,19 +64,6 @@ class TrainStatValue:
         model.save(Folder.STAT_VALUE_MODEL_FOLDER)
       else:
         self.api_builtin.print("Would save model to: " + Folder.STAT_VALUE_MODEL_FOLDER)
-
-
-  def get_preprocess(data):
-    x = []
-    y = []
-    for feature, label in data:
-      x.append(feature)
-      y.append(label)
-
-    x = np.array(x) / 255
-    x.reshape(-1, ImageSplitter.STAT_DATA.size[0], ImageSplitter.STAT_DATA.size[1], 1)
-    y = np.array(y)
-    return (x, y)
 
 
   def get_model(self):

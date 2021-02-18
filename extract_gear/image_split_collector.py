@@ -24,12 +24,6 @@ class ImageSplitCollector:
       self.run_extract_set_data()
     elif self.sub_task == 'card':
       self.run_extract_card_data()
-    elif self.sub_task == 'real':
-      # Delay expensive tensorflow import until necessary
-      from extract_gear.card_reader import CardReader
-
-      card_reader = CardReader()
-      card_reader.run()
     else:
       self.api_builtin.print("Failed to recognize sub-task")
       self.api_builtin.exit()
