@@ -84,7 +84,7 @@ class TestClassRepository(unittest.TestCase):
 
 
   def test_trainStatValueTask(self):
-    train_stat_value_task = TaskProvider.train_stat_type_task()
+    train_stat_value_task = TaskProvider.train_stat_value_task()
     self.assertEqual(bool, type(train_stat_value_task.safe))
     self.assertEqual(type(train_stat_value_task.api_builtin), api.api_builtin.ApiBuiltIn)
     self.assertEqual(type(train_stat_value_task.api_cv2), api.api_cv2.ApiCv2)

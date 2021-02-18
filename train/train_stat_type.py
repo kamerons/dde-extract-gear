@@ -5,120 +5,60 @@ import numpy as np
 from extract_gear.index import Index
 from extract_gear.image_splitter import ImageSplitter
 from folder.folder import Folder
+from train.train_stat_base import TrainStatBase
 
-class TrainStatType:
+class TrainStatType(TrainStatBase):
 
   NUM_EPOCHS = 10000
   LEARN_RATE = .0000002
 
 
   def __init__(self, args, api_builtin, api_cv2, api_json, api_random, api_tensorflow, image_scaler):
-    self.api_builtin = api_builtin
-    self.api_cv2 = api_cv2
-    self.api_json = api_json
+    super().__init__(args, api_builtin, api_cv2, api_json, api_tensorflow, image_scaler,
+    TrainStatType.NUM_EPOCHS, TrainStatType.LEARN_RATE, Index.STAT_OPTIONS)
     self.api_random = api_random
-    self.safe = args.safe
-    self.api_builtin.safe = True
-    self.api_cv2.safe = True
-    self.api_json.safe = True
-    self.api_tensorflow = api_tensorflow
-    self.image_scaler = image_scaler
+    self.ratio = .7
 
 
-  def train(self):
-    self.api_tensorflow.initialize_tensorflow()
-    with self.api_builtin.open(Folder.INDEX_FILE, "r") as fp:
-      index = self.api_json.load(fp)
-      train, test = self.split_index(.7, index)
-
-      x_train, y_train = self.image_scaler.prepare_for_classification(train)
-      x_test, y_test = self.image_scaler.prepare_for_classification(test)
-
-      datagen = self.api_tensorflow.ImageDataGenerator(
-        featurewise_center=False,
-        samplewise_center=False,
-        featurewise_std_normalization=False,
-        samplewise_std_normalization=False,
-        zca_whitening=False,
-        rotation_range=0,
-        zoom_range=0.0,
-        width_shift_range=0.1,
-        height_shift_range=0.1,
-        horizontal_flip=False,
-        vertical_flip=False)
-      datagen.fit(x_train)
-
-      model = self.get_model()
-      model.summary(print_fn=self.api_builtin.print)
-
-      opt = self.api_tensorflow.Adam(lr=TrainStatType.LEARN_RATE)
-      model.compile(optimizer=opt, loss=self.api_tensorflow.SparseCategoricalCrossentropy(from_logits=True),
-        metrics=['accuracy'])
-      model.fit(x_train, y_train, epochs=TrainStatType.NUM_EPOCHS, validation_data=(x_test, y_test))
-      predictions = model.predict_classes(x_test)
-      predictions = predictions.reshape(1,-1)[0]
-      self.api_builtin.print(self.api_tensorflow.classification_report(y_test, predictions, target_names=Index.STAT_OPTIONS))
-      if not self.safe:
-        model.save(Folder.STAT_TYPE_MODEL_FOLDER)
-      else:
-        self.api_builtin.print("Would save model to: " + Folder.STAT_TYPE_MODEL_FOLDER)
-
-
-  def preview(self, arr):
-    print(str(arr[1]))
-    self.api_builtin.print(Index.STAT_OPTIONS[arr[1]])
-    self.api_cv2.show_img(arr[0])
-
-
-  def get_model(self):
-    model = self.api_tensorflow.Sequential()
-    model.add(self.api_tensorflow.Conv2D(32,3,padding="same", activation="relu",
-      input_shape=(ImageSplitter.STAT_DATA.size[0], ImageSplitter.STAT_DATA.size[1], 3)))
-    model.add(self.api_tensorflow.MaxPool2D())
-
-    model.add(self.api_tensorflow.Conv2D(32, 3, padding="same", activation="relu"))
-    model.add(self.api_tensorflow.MaxPool2D())
-
-    model.add(self.api_tensorflow.Conv2D(64, 3, padding="same", activation="relu"))
-    model.add(self.api_tensorflow.MaxPool2D())
-    model.add(self.api_tensorflow.Dropout(0.4))
-
-    model.add(self.api_tensorflow.Flatten())
-    model.add(self.api_tensorflow.Dense(128,activation="relu"))
-    model.add(self.api_tensorflow.Dense(len(Index.STAT_OPTIONS)))
-    return model
-
-
-  def split_index(self, ratio, index):
+  def split_index(self, index):
     self.api_random.shuffle(index)
-    num = {}
-    num_train = {}
-    for key in Index.STAT_OPTIONS:
-      num[key] = 0
-      num_train[key] = 0
+    minimum = self.get_limiting_stat_type(index)
+    return self.get_train_and_test_data(index, minimum)
 
-    for d in index:
-      num[d[Index.STAT_TYPE_KEY]] += 1
+
+  def get_limiting_stat_type(self, index):
+    max_seen_of_each_stat_type = {}
+    for stat_type in Index.STAT_OPTIONS:
+      max_seen_of_each_stat_type[stat_type] = 0
+
+    for data in index:
+      max_seen_of_each_stat_type[data[Index.STAT_TYPE_KEY]] += 1
 
     minimum = len(index)
-    for key in Index.STAT_OPTIONS:
-      if num[key] < minimum:
-        minimum = num[key]
+    for stat_type in Index.STAT_OPTIONS:
+      if max_seen_of_each_stat_type[stat_type] < minimum:
+        minimum = max_seen_of_each_stat_type[stat_type]
+    return minimum
 
+
+  def get_train_and_test_data(self, index, minimum):
     train = []
     test = []
-    for d in index:
-      stat_type = d[Index.STAT_TYPE_KEY]
-      if num_train[stat_type] < ratio * minimum:
-        num_train[stat_type] += 1
-        x = self.read_img(d, stat_type)
-        train.append(x)
-      elif num_train[stat_type] >= minimum:
-        continue
-      else:
-        num_train[stat_type] += 1
-        x = self.read_img(d, stat_type)
-        test.append(x)
+
+    seen_of_each_stat_type = {}
+    for stat_type in Index.STAT_OPTIONS:
+      seen_of_each_stat_type[stat_type] = 0
+
+    for data in index:
+      stat_type = data[Index.STAT_TYPE_KEY]
+      if seen_of_each_stat_type[stat_type] < self.ratio * minimum:
+        seen_of_each_stat_type[stat_type] += 1
+        image_and_stat_type = self.read_img(data, stat_type)
+        train.append(image_and_stat_type)
+      elif seen_of_each_stat_type[stat_type] < minimum:
+        seen_of_each_stat_type[stat_type] += 1
+        image_and_stat_type = self.read_img(data, stat_type)
+        test.append(image_and_stat_type)
     return train, test
 
 

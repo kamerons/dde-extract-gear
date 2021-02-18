@@ -77,6 +77,6 @@ class TaskProvider(containers.DeclarativeContainer):
     Api2.api_pyautogui, Api2.api_json, Api1.api_time, Internal3.card_reader)
 
   train_stat_value_task = providers.Singleton(TrainStatValue, Configs.config, Api1.api_builtin,
-    Api2.api_cv2, Api2.api_json, Api1.api_random, Internal1.image_scaler)
+    Api2.api_cv2, Api2.api_json, Api1.api_random, Api1.api_tensorflow, Internal1.image_scaler)
   train_stat_type_task = providers.Singleton(TrainStatType, Configs.config, Api1.api_builtin,
     Api2.api_cv2, Api2.api_json, Api1.api_random, Api1.api_tensorflow, Internal1.image_scaler)
