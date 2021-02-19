@@ -36,7 +36,7 @@ class Api1(containers.DeclarativeContainer):
   api_curses = providers.Singleton(ApiCurses)
   api_pytesseract = providers.Singleton(ApiPyTesseract)
   api_random = providers.Singleton(ApiRandom)
-  api_tensorflow = providers.Singleton(ApiTensorflow)
+  api_tensorflow = providers.Singleton(ApiTensorflow, Configs.config)
   api_time = providers.Singleton(ApiTime)
 
 
@@ -67,8 +67,8 @@ class Internal3(containers.DeclarativeContainer):
 class TaskProvider(containers.DeclarativeContainer):
   image_split_task = providers.Singleton(ImageSplitCollector, Configs.config, Api1.api_builtin,
     Api2.api_cv2, Internal1.image_splitter)
-  model_evaluator_task = providers.Singleton(ModelEvaluator, Configs.config, Api1.api_builtin,
-    Api2.api_cv2, Api1.api_pytesseract, Internal1.preprocess_factory, Internal3.card_reader)
+  model_evaluator_task = providers.Singleton(ModelEvaluator, Api1.api_builtin, Api2.api_cv2,
+    Internal3.card_reader, Internal1.image_splitter)
   collect_gear_task = providers.Singleton(CollectGearTask, Api1.api_builtin, Api2.api_pyautogui,
     Api1.api_time)
   index_task = providers.Singleton(Index, Configs.config, Api1.api_builtin, Api1.api_curses,

@@ -2,8 +2,11 @@ import os
 
 class ApiTensorflow:
 
-  def initialize_tensorflow(self, quiet=False):
-    if quiet:
+  def __init__(self, args):
+    self.quiet = args.quiet
+
+  def initialize_tensorflow(self):
+    if self.quiet:
       os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
     import tensorflow as tf

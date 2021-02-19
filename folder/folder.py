@@ -12,6 +12,7 @@ class Folder:
   INDEX_FILE = "data/stat/index.json"
   COLLECT_FILE = "data/collected.json"
   PROGRESS_FILE = "data/stat/progress.json"
+  CARD_FILE = "data/card.json"
 
   STAT_TYPE_MODEL_FOLDER = "data/stat_type_model"
   STAT_VALUE_MODEL_FOLDER = "data/stat_value_model"

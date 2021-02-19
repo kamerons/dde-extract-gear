@@ -67,7 +67,6 @@ class TestClassRepository(unittest.TestCase):
 
   def test_modelEvaluatorTask(self):
     model_evaluator_task = TaskProvider.model_evaluator_task()
-    self.assertEqual("subtask", model_evaluator_task.sub_task)
     self.assert_obj_has_attributes_of_correct_type(model_evaluator_task)
 
 
