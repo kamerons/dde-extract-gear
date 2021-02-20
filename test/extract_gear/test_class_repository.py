@@ -23,6 +23,7 @@ class TestClassRepository(unittest.TestCase):
     "api_cv2": api.api_cv2.ApiCv2,
     "api_fuzzywuzzy": api.api_fuzzywuzzy.ApiFuzzyWuzzy,
     "api_json": api.api_json.ApiJson,
+    "api_keyboard": api.api_keyboard.ApiKeyboard,
     "api_pyautogui": api.api_pyautogui.ApiPyAutoGui,
     "api_pytesseract": api.api_pytesseract.ApiPyTesseract,
     "api_random": api.api_random.ApiRandom,

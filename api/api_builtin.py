@@ -19,6 +19,13 @@ class ApiBuiltIn:
     return input(prompt)
 
 
+  def input_safe_int(self, prompt):
+    user_input = input(prompt)
+    while not user_input.isnumeric():
+      user_input = input("Enter a valid integer\n> ")
+    return int(user_input)
+
+
   def exit(self):
     exit()
 

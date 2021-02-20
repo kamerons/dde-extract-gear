@@ -5,6 +5,7 @@ from api.api_curses import ApiCurses
 from api.api_cv2 import ApiCv2
 from api.api_fuzzywuzzy import ApiFuzzyWuzzy
 from api.api_json import ApiJson
+from api.api_keyboard import ApiKeyboard
 from api.api_pyautogui import ApiPyAutoGui
 from api.api_pytesseract import ApiPyTesseract
 from api.api_random import ApiRandom
@@ -34,6 +35,7 @@ class Api1(containers.DeclarativeContainer):
   api_builtin = providers.Singleton(ApiBuiltIn, Configs.config)
   api_fuzzywuzzy = providers.Singleton(ApiFuzzyWuzzy)
   api_curses = providers.Singleton(ApiCurses)
+  api_keyboard = providers.Singleton(ApiKeyboard)
   api_pytesseract = providers.Singleton(ApiPyTesseract)
   api_random = providers.Singleton(ApiRandom)
   api_tensorflow = providers.Singleton(ApiTensorflow, Configs.config)
@@ -74,7 +76,7 @@ class TaskProvider(containers.DeclarativeContainer):
   index_task = providers.Singleton(Index, Configs.config, Api1.api_builtin, Api1.api_curses,
     Api2.api_cv2, Api2.api_json, Api1.api_time)
   extract_gear = providers.Singleton(ExtractGear, Api1.api_builtin, Api2.api_cv2,
-    Api2.api_pyautogui, Api2.api_json, Api1.api_time, Internal3.card_reader)
+    Api2.api_pyautogui, Api2.api_json, Api1.api_time, Api1.api_keyboard, Internal3.card_reader)
 
   train_stat_value_task = providers.Singleton(TrainStatValue, Configs.config, Api1.api_builtin,
     Api2.api_cv2, Api2.api_json, Api1.api_random, Api1.api_tensorflow, Internal1.image_scaler)
