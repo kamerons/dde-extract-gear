@@ -1,12 +1,27 @@
-from extract_gear.image_type_data import ImageTypeData
+class ImageGroupData:
+
+  def __init__(self, start_y, start_x, y_gear_offset, x_gear_offset):
+    self.start_y = start_y
+    self.start_x = start_x
+    self.y_gear_offset = y_gear_offset
+    self.x_gear_offset = x_gear_offset
+
+
+class ImageTypeData:
+
+  def __init__(self, size, rel_start_offset, rows=None, columns=None, pass_fn=None, next_offset=None):
+    self.size = size
+    self.rel_start_offset = rel_start_offset
+    self.rows = rows
+    self.columns = columns
+    self.pass_fn = pass_fn
+    self.next_offset = next_offset
+
 
 class ImageSplitter:
 
-  X_START = 390
-  Y_START = 375
-
-  X_GEAR_OFFSET = 174
-  Y_GEAR_OFFSET = 177
+  STANDARD_GROUP_DATA = ImageGroupData(375, 390, 177, 174)
+  BLUEPRINT_GROUP_DATA = ImageGroupData(293, 423, 129, 126)
 
   CARD_DATA = ImageTypeData((430,350), (-112,-10))
   SET_DATA = ImageTypeData((20,140), (-100,100))
@@ -14,30 +29,30 @@ class ImageSplitter:
   LEVEL_DATA = ImageTypeData((30,70), (268,180), 2, 3, lambda col, row: row == 0 and col == 2, (-88,60))
 
 
-  def extract_stat_card(self, img, gear_coord):
-    return self.get_single_image_split(img, gear_coord, ImageSplitter.CARD_DATA)
+  def extract_stat_card(self, img, gear_coord, blueprint=False):
+    return self.get_single_image_split(img, gear_coord, ImageSplitter.CARD_DATA, blueprint=blueprint)
 
 
-  def extract_set_image(self, img, gear_coord):
-    return self.get_single_image_split(img, gear_coord, ImageSplitter.SET_DATA)
+  def extract_set_image(self, img, gear_coord, blueprint=False):
+    return self.get_single_image_split(img, gear_coord, ImageSplitter.SET_DATA, blueprint=blueprint)
 
 
-  def extract_stat_images(self, img, gear_coord):
-    return self.get_group_image_split(img, gear_coord, ImageSplitter.STAT_DATA)
+  def extract_stat_images(self, img, gear_coord, blueprint=False):
+    return self.get_group_image_split(img, gear_coord, ImageSplitter.STAT_DATA, blueprint=blueprint)
 
 
-  def extract_level_images(self, img, gear_coord):
-    return self.get_group_image_split(img, gear_coord, ImageSplitter.LEVEL_DATA)
+  def extract_level_images(self, img, gear_coord, blueprint=False):
+    return self.get_group_image_split(img, gear_coord, ImageSplitter.LEVEL_DATA, blueprint=blueprint)
 
 
-  def get_single_image_split(self, img, gear_coord, image_type_data):
-    start_coord = self.get_start_coord(gear_coord, image_type_data.rel_start_offset)
+  def get_single_image_split(self, img, gear_coord, image_type_data, blueprint=False):
+    start_coord = self.get_start_coord(gear_coord, image_type_data.rel_start_offset, blueprint=blueprint)
     return self.get_image_from_start(img, start_coord, image_type_data.size)
 
 
-  def get_group_image_split(self, img, gear_coord, image_type_data):
+  def get_group_image_split(self, img, gear_coord, image_type_data, blueprint=False):
     images = []
-    abs_start_coord = self.get_start_coord(gear_coord, image_type_data.rel_start_offset)
+    abs_start_coord = self.get_start_coord(gear_coord, image_type_data.rel_start_offset, blueprint=blueprint)
     for row in range(image_type_data.rows):
       for col in range(image_type_data.columns):
         if image_type_data.pass_fn(col, row):
@@ -49,11 +64,16 @@ class ImageSplitter:
     return images
 
 
-  def get_start_coord(self, gear_coord, rel_start_offset):
-    y_gear_offset, x_gear_offset = gear_coord
-    y_offset, x_offset = rel_start_offset
-    y_point = ImageSplitter.Y_START + (y_gear_offset-1) * ImageSplitter.Y_GEAR_OFFSET + y_offset
-    x_point = ImageSplitter.X_START + (x_gear_offset-1) * ImageSplitter.X_GEAR_OFFSET + x_offset
+  def get_start_coord(self, gear_coord, rel_start_offset, blueprint=False):
+    if blueprint:
+      group_data = ImageSplitter.BLUEPRINT_GROUP_DATA
+    else:
+      group_data = ImageSplitter.STANDARD_GROUP_DATA
+
+    y_gear_pos, x_gear_pos = gear_coord
+    y_rel_offset, x_rel_offset = rel_start_offset
+    y_point = group_data.start_y + (y_gear_pos-1) * group_data.y_gear_offset + y_rel_offset
+    x_point = group_data.start_x + (x_gear_pos-1) * group_data.x_gear_offset + x_rel_offset
     return (y_point, x_point)
 
 

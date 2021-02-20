@@ -71,8 +71,8 @@ class TaskProvider(containers.DeclarativeContainer):
     Api2.api_cv2, Internal1.image_splitter)
   model_evaluator_task = providers.Singleton(ModelEvaluator, Api1.api_builtin, Api2.api_cv2,
     Internal3.card_reader, Internal1.image_splitter)
-  collect_gear_task = providers.Singleton(CollectGearTask, Api1.api_builtin, Api2.api_pyautogui,
-    Api1.api_time)
+  collect_gear_task = providers.Singleton(CollectGearTask, Configs.config, Api1.api_builtin,
+    Api1.api_keyboard, Api2.api_pyautogui, Api1.api_time)
   index_task = providers.Singleton(Index, Configs.config, Api1.api_builtin, Api1.api_curses,
     Api2.api_cv2, Api2.api_json, Api1.api_time)
   extract_gear = providers.Singleton(ExtractGear, Api1.api_builtin, Api2.api_cv2,

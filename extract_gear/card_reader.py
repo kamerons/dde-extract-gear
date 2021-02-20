@@ -27,10 +27,10 @@ class CardReader:
       self.api_cv2.show_img(copy)
 
 
-  def get_img_data(self, img, coord):
-    set_type_image = self.image_splitter.extract_set_image(img, coord)
+  def get_img_data(self, img, coord, is_blueprint=False):
+    set_type_image = self.image_splitter.extract_set_image(img, coord, blueprint=is_blueprint)
     armor_type = self.set_type_reader.get_armor_type(set_type_image)
-    stat_images = self.image_splitter.extract_stat_images(img, coord)
+    stat_images = self.image_splitter.extract_stat_images(img, coord, blueprint=is_blueprint)
     stats = self.stat_group_reader.get_stat_types_and_values(stat_images)
     max_level = 16
     current_level = 1

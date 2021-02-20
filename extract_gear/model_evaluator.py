@@ -13,16 +13,23 @@ class ModelEvaluator:
     self.api_cv2 = api_cv2
     self.card_reader = card_reader
     self.image_splitter = image_splitter
+    self.api_builtin.safe = True
+    self.api_cv2.safe = True
+    self.is_blueprint = False
 
 
   def run(self):
-    index = self.read_index()
-    failed = self.get_failed(index)
-    self.slideshow_failed(failed)
+    for _ in range(2):
+      self.api_builtin.print("Beginning %s files" % ("blueprint" if self.is_blueprint else "regular"))
+      index = self.read_index()
+      failed = self.get_failed(index)
+      self.slideshow_failed(failed)
+      self.is_blueprint = not self.is_blueprint
 
 
   def read_index(self):
-    with open(Folder.CARD_FILE, "r") as fp:
+    file_name = Folder.BLUEPRINT_CARD_FILE if self.is_blueprint else Folder.CARD_FILE
+    with open(file_name, "r") as fp:
       return json.load(fp)
 
 
@@ -37,9 +44,10 @@ class ModelEvaluator:
     self.api_builtin.print("Showing %d failed images" % len(failed))
     for file_name, guess in failed:
       self.api_builtin.print(guess)
-      img = self.api_cv2.imread(Folder.PREPROCESS_FOLDER + file_name)
+      folder = Folder.BLUEPRINT_FOLDER if self.is_blueprint else Folder.PREPROCESS_FOLDER
+      img = self.api_cv2.imread(folder + file_name)
       gear_coord = int(file_name[1]), int(file_name[0])
-      img = self.image_splitter.extract_stat_card(img, gear_coord)
+      img = self.image_splitter.extract_stat_card(img, gear_coord, self.is_blueprint)
       self.api_cv2.show_img(img)
 
 
@@ -47,8 +55,9 @@ class ModelEvaluator:
     data = index[i]
     file_name = data[Index.FILE_NAME_KEY]
     gear_coord = int(file_name[1]), int(file_name[0])
-    img = self.api_cv2.imread(Folder.PREPROCESS_FOLDER + file_name)
-    card_data = self.card_reader.get_img_data(img, gear_coord)
+    folder = Folder.BLUEPRINT_FOLDER if self.is_blueprint else Folder.PREPROCESS_FOLDER
+    img = self.api_cv2.imread(folder + file_name)
+    card_data = self.card_reader.get_img_data(img, gear_coord, self.is_blueprint)
     if not self.is_accurate(card_data, data):
       failed.append([file_name, card_data])
     if (i+1) % 10 == 0:

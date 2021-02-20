@@ -1,8 +1,7 @@
 import numpy as np
 import unittest
 
-from extract_gear.image_splitter import ImageSplitter
-from extract_gear.image_type_data import ImageTypeData
+from extract_gear.image_splitter import ImageSplitter, ImageTypeData
 from test.util.test_util import TestUtil
 from train.image_scaler import ImageScaler
 

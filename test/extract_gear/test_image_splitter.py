@@ -4,8 +4,7 @@ import unittest
 from unittest.mock import patch
 from unittest.mock import Mock
 
-from extract_gear.image_splitter import ImageSplitter
-from extract_gear.image_type_data import ImageTypeData
+from extract_gear.image_splitter import ImageSplitter, ImageTypeData, ImageGroupData
 
 from test.util.test_util import TestUtil
 
@@ -71,6 +70,7 @@ class TestImageSplitter(unittest.TestCase):
     image_splitter = ImageSplitter()
 
     images = image_splitter.extract_level_images(img, (1,1))
+
     #return 6 images of size 2x2
     for i in range(5):
       self.assertEqual(255, images[i][0,0])
@@ -83,6 +83,7 @@ class TestImageSplitter(unittest.TestCase):
     img = np.full((3,3,1), 0, np.uint8)
     img[1,1] = 255
     image_splitter = ImageSplitter()
+
     img = image_splitter.extract_set_image(img, (1,1))
 
     self.assertEqual((2,2,1), img.shape)
@@ -96,6 +97,7 @@ class TestImageSplitter(unittest.TestCase):
     img = np.full((3,3,1), 0, np.uint8)
     img[1,1] = 255
     image_splitter = ImageSplitter()
+
     img = image_splitter.extract_stat_card(img, (1,1))
 
     self.assertEqual((2,3,1), img.shape)
@@ -110,16 +112,17 @@ class TestImageSplitter(unittest.TestCase):
     img = np.full((end_coord[0] + 1, end_coord[1] + 1, 1), 0, np.uint8)
     img[end_coord] = 255
     image_splitter = ImageSplitter()
+
     split_img = image_splitter.get_single_image_split(img, (1,1), image_type_data)
+
     self.assertEqual(255, split_img[0,0][0])
 
 
   def test_getSingleImageSplit_usesGearCoord(self):
     image_type_data = ImageTypeData((1,1), (0,0))
+    ImageSplitter.STANDARD_GROUP_DATA = ImageGroupData(0, 0, 2, 1)
     gear_coord = (3,4)
     gear_offset= (2,1)
-    ImageSplitter.Y_GEAR_OFFSET = 2
-    ImageSplitter.X_GEAR_OFFSET = 1
 
     y_end_coord = (gear_coord[0] - 1) * gear_offset[0]
     x_end_coord = (gear_coord[1] - 1) * gear_offset[1]
@@ -130,20 +133,37 @@ class TestImageSplitter(unittest.TestCase):
     img = np.full((y_size, x_size, 1), 0, np.uint8)
     img[(y_end_coord, x_end_coord)] = 255
     image_splitter = ImageSplitter()
+
     split_img = image_splitter.get_single_image_split(img, gear_coord, image_type_data)
+
     self.assertEqual(255, split_img[0,0][0])
 
 
-  def test_getSingleImageSplit_usesImageSplitterStart(self):
+  def test_getSingleImageSplit_usesStandardStart(self):
     image_type_data = ImageTypeData((1,1), (0,0))
     end_coord = (2,1)
-    ImageSplitter.Y_START = end_coord[0]
-    ImageSplitter.X_START = end_coord[1]
+    ImageSplitter.STANDARD_GROUP_DATA = ImageGroupData(end_coord[0], end_coord[1], 0, 0)
 
     img = np.full((end_coord[0]+1, end_coord[1]+1, 1), 0, np.uint8)
     img[end_coord] = 255
     image_splitter = ImageSplitter()
+
     split_img = image_splitter.get_single_image_split(img, (1,1), image_type_data)
+
+    self.assertEqual(255, split_img[0,0][0])
+
+
+  def test_getSingleImageSplit_usesBlueprint(self):
+    image_type_data = ImageTypeData((1,1), (0,0))
+    end_coord = (2,1)
+    ImageSplitter.BLUEPRINT_GROUP_DATA = ImageGroupData(end_coord[0], end_coord[1], 0, 0)
+
+    img = np.full((end_coord[0]+1, end_coord[1]+1, 1), 0, np.uint8)
+    img[end_coord] = 255
+    image_splitter = ImageSplitter()
+
+    split_img = image_splitter.get_single_image_split(img, (1,1), image_type_data, blueprint=True)
+
     self.assertEqual(255, split_img[0,0][0])
 
 
@@ -154,5 +174,5 @@ class TestImageSplitter(unittest.TestCase):
           self.assertEqual(expected_color, img[row,col])
 
   def setZeroStart(self):
-    ImageSplitter.Y_START = 0
-    ImageSplitter.X_START = 0
+    ImageSplitter.STANDARD_GROUP_DATA = ImageGroupData(0, 0, 0, 0)
+    ImageSplitter.BLUEPRINT_GROUP_DATA = ImageGroupData(0, 0, 0, 0)
