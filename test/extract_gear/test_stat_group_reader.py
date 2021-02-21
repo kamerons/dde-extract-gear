@@ -70,6 +70,27 @@ class TestStatGroupReader(unittest.TestCase):
     self.assertEqual(823, stats[Index.STAT_OPTIONS[0]])
 
 
+  def test_getArmorType_ignoresDigitsAboveNine(self):
+    StatGroupReader.TOTAL_NUM_IMAGES = 1
+
+    stat_value_preprocessor = Mock()
+    stat_value_preprocessor.digits.__len__ = Mock(return_value=3)
+    preprocess_factory = Mock()
+    preprocess_factory.get_stat_preprocessor.return_value = stat_value_preprocessor
+
+    mock_tensorflow = Mock()
+    type_model = Mock()
+    value_model = Mock()
+    mock_tensorflow.load_model.side_effect = [type_model, value_model]
+    stat_group_reader = StatGroupReader(preprocess_factory, mock_tensorflow, Mock())
+    type_model.predict_classes.return_value = [0]
+    value_model.predict_classes.return_value = [10, 8, 2, 3, 10]
+
+    stats = stat_group_reader.get_stat_types_and_values(["unprocessed images"])
+
+    self.assertEqual(823, stats[Index.STAT_OPTIONS[0]])
+
+
   def test_getArmorType_skipsStatIfThereAreNoDigits(self):
     StatGroupReader.TOTAL_NUM_IMAGES = 1
 

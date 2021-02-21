@@ -5,16 +5,21 @@ from folder.folder import Folder
 
 class CollectGearTask:
 
-  def __init__(self, config, api_builtin, api_keyboard, api_pyautogui, api_time):
+  def __init__(self, args, api_builtin, api_keyboard, api_pyautogui, api_time):
     self.api_builtin = api_builtin
     self.api_keyboard = api_keyboard
     self.api_pyautogui = api_pyautogui
     self.api_time = api_time
-    self.sub_task = config.command[1]
+    self.sub_task = args.command[1]
     self.i = 0
 
 
   def run(self):
+    self.api_builtin.begin_message("gear collection")
+    self.collect_gear()
+
+
+  def collect_gear(self):
     if self.sub_task == "blueprint":
       num_col = 4
       num_row = 6

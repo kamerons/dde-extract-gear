@@ -1,9 +1,7 @@
-from fuzzywuzzy import fuzz
 import numpy as np
 import os
 import sys
 
-from extract_gear.image_splitter import ImageSplitter
 from folder.folder import Folder
 
 class ImageSplitCollector:
@@ -16,14 +14,13 @@ class ImageSplitCollector:
 
 
   def run(self):
+    self.api_builtin.begin_message("image split collection")
     if self.sub_task == 'stat':
       self.run_extract_stat_data()
     elif self.sub_task == 'level':
       self.run_extract_level_data()
     elif self.sub_task == 'set':
       self.run_extract_set_data()
-    elif self.sub_task == 'card':
-      self.run_extract_card_data()
     else:
       self.api_builtin.print("Failed to recognize sub-task")
       self.api_builtin.exit()
@@ -91,20 +88,6 @@ class ImageSplitCollector:
       print("Processing %d of %d"  % (num + 1, len(files)))
       gear_coord = int(file_name[1]), int(file_name[0])
       img = self.image_splitter.extract_set_image(img, gear_coord)
-      self.api_cv2.show_img(img)
-      self.api_cv2.imwrite('%s%03d.png' % (Folder.SET_CROP_FOLDER, num), img)
-      num += 1
-
-
-  def run_extract_card_data(self):
-    num = 0
-    files = sorted(os.listdir(Folder.PREPROCESS_FOLDER))
-    for file_name in files:
-      img = self.api_cv2.imread(Folder.PREPROCESS_FOLDER + file_name)
-      print("Processing %d of %d"  % (num + 1, len(files)))
-      gear_coord = int(file_name[1]), int(file_name[0])
-      img = self.image_splitter.extract_stat_card(img, gear_coord)
-      print(str(img.shape))
       self.api_cv2.show_img(img)
       self.api_cv2.imwrite('%s%03d.png' % (Folder.SET_CROP_FOLDER, num), img)
       num += 1

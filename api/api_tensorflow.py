@@ -39,3 +39,6 @@ class ApiTensorflow:
 
     from tensorflow.keras.models import load_model as lm
     self.load_model = lm
+
+    from tensorflow.keras.optimizers.schedules import ExponentialDecay as ED
+    self.ExponentialDecay = ED

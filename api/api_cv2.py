@@ -5,6 +5,7 @@ class ApiCv2:
   def __init__(self, args, api_builtin):
     self.show_images = not args.quiet
     self.safe = args.safe
+    self.quiet = args.quiet
     self.api_builtin = api_builtin
 
 
@@ -15,7 +16,6 @@ class ApiCv2:
   def imwrite(self, file_name, img):
     if not self.safe:
       return cv2.imwrite(file_name, img)
-    self.api_builtin.print("Would write to %s" % file_name)
 
 
   def show_img(self, img, window_name="img", waitKey=0):

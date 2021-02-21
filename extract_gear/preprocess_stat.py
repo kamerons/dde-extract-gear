@@ -21,7 +21,6 @@ class PreProcessStat(PreProcessor):
 
   def process_stat(self):
     self.increase_contrast()
-    self.trim_edges()
     self.trim_splotches()
     return self.img
 
@@ -60,22 +59,6 @@ class PreProcessStat(PreProcessor):
       x = coordinate[1] + x_adj
       digit[y,x] = [0, 0, 0]
     self.digits.append(digit)
-
-
-  # often, we detect erroneous detail close to the edge of the bounding box. However, a number
-  # will never directly touch the edge of the box. Remove any such detail, cleaning up the image
-  def trim_edges(self):
-    for y in range(PreProcessStat.LOW_Y, PreProcessStat.HIGH_Y):
-      if self.is_black(self.img[y, PreProcessStat.LOW_X]):
-        self.remove_area((y, PreProcessStat.LOW_X))
-      if self.is_black(self.img[y, PreProcessStat.HIGH_X-1]):
-        self.remove_area((y, PreProcessStat.HIGH_X-1))
-
-    for x in range(PreProcessStat.LOW_X, PreProcessStat.HIGH_X):
-      if self.is_black(self.img[PreProcessStat.LOW_Y, x]):
-        self.remove_area((PreProcessStat.LOW_Y, x))
-      if self.is_black(self.img[PreProcessStat.HIGH_Y-1, x]):
-        self.remove_area((PreProcessStat.HIGH_Y-1, x))
 
 
   # Remove small leftovers pixels that have a small area. Numbers will never have a small area

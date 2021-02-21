@@ -30,6 +30,12 @@ class ApiBuiltIn:
     exit()
 
 
+  def begin_message(self, task_name):
+    mode = "safe" if self.safe else "unsafe"
+    self.print("Beginning %s in %s mode." % (task_name, mode))
+    self.input("Press enter to confirm")
+
+
 # We need this so we can use the with as syntax.  It doesn't need to do anything since we don't actually
 # open the file
 class EmptyContextManger:

@@ -5,10 +5,15 @@ class Folder:
   SET_CROP_FOLDER = "data/set/process/"
   TMP_FOLDER = "data/tmp/"
   BLUEPRINT_FOLDER = "data/blueprint/"
+  ICON_CROP_FOLDER = "data/icon/"
+  DIGIT_CROP_FOLDER = "data/digit/"
 
   PREPROCESS_FOLDER = "data/preprocess/"
 
   STAT_SAVE_FOLDER = "data/stat/save/"
+
+  ICON_INDEX_FILE = "data/icon_index.json"
+  DIGIT_INDEX_FILE = "data/digit_index.json"
 
   INDEX_FILE = "data/stat/index.json"
   COLLECT_FILE = "data/collected.json"

@@ -17,8 +17,8 @@ class Index:
 
   NONE = "none"
 
-  STAT_OPTIONS = ['electric', 'fire', 'poison', 'base', 'hero_dmg', 'hero_hp', 'hero_speed',
-    'hero_rate', 'offense', 'defense', 'tower_dmg', 'tower_rate', 'tower_hp', 'tower_range', NONE]
+  STAT_OPTIONS = ['base', 'fire', 'electric', 'poison', 'hero_hp', 'hero_dmg', 'hero_rate', 'hero_speed',
+    'offense', 'defense',  'tower_hp', 'tower_dmg', 'tower_rate', 'tower_range', NONE]
 
   STAT_TYPE_KEY = "type"
   FILE_NAME_KEY = "file_name"
@@ -40,10 +40,11 @@ class Index:
 
 
   def run(self):
-    self.api_curses.wrapper(self.main_loop)
+    self.api_builtin.begin_message("manual index creation")
+    self.api_curses.wrapper(self.create_index_manual)
 
 
-  def main_loop(self, stdscr):
+  def create_index_manual(self, stdscr):
     self.api_curses.start_color()
     self.api_curses.use_default_colors()
     for i in range(0, self.api_curses.get_COLORS()):

@@ -4,7 +4,7 @@ import api
 import extract_gear
 import train
 
-from extract_gear.class_repository import Configs, TaskProvider, Internal2, Internal3
+from extract_gear.class_repository import Configs, TaskProvider, Internal2, Internal3, Trainers
 from extract_gear.card_reader import CardReader
 from extract_gear.image_splitter import ImageSplitter
 from extract_gear.preprocess_factory import PreprocessFactory
@@ -12,6 +12,8 @@ from extract_gear.set_type_reader import SetTypeReader
 from extract_gear.stat_group_reader import StatGroupReader
 
 from train.image_scaler import ImageScaler
+from train.train_stat_type import TrainStatType
+from train.train_stat_value import TrainStatValue
 
 from test.util.test_util import TestUtil, Arg
 
@@ -34,6 +36,8 @@ class TestClassRepository(unittest.TestCase):
     "perprocess_factory": PreprocessFactory,
     "set_type_reader": SetTypeReader,
     "stat_group_reader": StatGroupReader,
+    "train_stat_type": TrainStatType,
+    "train_stat_value": TrainStatValue,
     "safe": bool
   }
 
@@ -82,14 +86,24 @@ class TestClassRepository(unittest.TestCase):
     self.assert_obj_has_attributes_of_correct_type(index_task)
 
 
+  def test_createFastIndexTask(self):
+    create_fast_index_task = TaskProvider.create_fast_index_task()
+    self.assert_obj_has_attributes_of_correct_type(create_fast_index_task)
+
+
+  def test_trainTask(self):
+    train_task = TaskProvider.train_task()
+    self.assert_obj_has_attributes_of_correct_type(train_task)
+
+
   def test_trainStatValueTask(self):
-    train_stat_value_task = TaskProvider.train_stat_value_task()
-    self.assert_obj_has_attributes_of_correct_type(train_stat_value_task)
+    train_stat_value = Trainers.train_stat_value()
+    self.assert_obj_has_attributes_of_correct_type(train_stat_value)
 
 
   def test_trainStatTypeTask(self):
-    train_stat_type_task = TaskProvider.train_stat_type_task()
-    self.assert_obj_has_attributes_of_correct_type(train_stat_type_task)
+    train_stat_type = Trainers.train_stat_type()
+    self.assert_obj_has_attributes_of_correct_type(train_stat_type)
 
 
   def test_extractGear(self):

@@ -67,51 +67,6 @@ class TestPreProcessSet(unittest.TestCase):
 
 
   @timeout_decorator.timeout(1)
-  def test_trimEdges_dotsRemoved(self):
-    img = self.setup_squareImg(4)
-    left_dot_coord = (1,0)
-    bottom_dot_coord = (0,2)
-    right_dot_coord = (1,3)
-    top_dot_coord = (3,2)
-
-    img[left_dot_coord] = TestPreProcessSet.BLACK
-    img[bottom_dot_coord] = TestPreProcessSet.BLACK
-    img[right_dot_coord] = TestPreProcessSet.BLACK
-    img[top_dot_coord] = TestPreProcessSet.BLACK
-    processor = PreProcessStat(img)
-
-    processor.trim_edges()
-
-    self.assertEqual(all(img[left_dot_coord]), all(TestPreProcessSet.WHITE))
-    self.assertEqual(all(img[bottom_dot_coord]), all(TestPreProcessSet.WHITE))
-    self.assertEqual(all(img[right_dot_coord]), all(TestPreProcessSet.WHITE))
-    self.assertEqual(all(img[top_dot_coord]), all(TestPreProcessSet.WHITE))
-
-  @timeout_decorator.timeout(1)
-  def test_trimEdges_areasRemoved(self):
-    img = self.setup_squareImg(3)
-    origin = (0,0)
-    self.addSquareAtoLocation(img, origin, 2)
-    processor = PreProcessStat(img)
-
-    processor.trim_edges()
-
-    self.assertSquareIsColor(img, origin, 2, TestPreProcessSet.WHITE)
-
-
-  @timeout_decorator.timeout(1)
-  def test_trimEdges_nonEdgesSpared(self):
-    img = self.setup_squareImg(3)
-    middle_coord = (1, 1)
-    img[middle_coord] = TestPreProcessSet.BLACK
-    processor = PreProcessStat(img)
-
-    processor.trim_edges()
-
-    self.assertEqual(all(img[middle_coord]), all(TestPreProcessSet.BLACK))
-
-
-  @timeout_decorator.timeout(1)
   def test_trimSplotches_smallAreasRemoved(self):
     PreProcessStat.AREA_THRESHOLD = 5
     img = self.setup_squareImg(4)

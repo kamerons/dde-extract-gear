@@ -17,8 +17,14 @@ class ModelEvaluator:
     self.api_cv2.safe = True
     self.is_blueprint = False
 
-
   def run(self):
+    self.api_builtin.print("Beginning model evaluation task.")
+    self.api_builtin.print("Model evaluation can only be run in safe mode")
+    self.api_builtin.input("Press enter to confirm")
+    self.evaluate_model()
+
+
+  def evaluate_model(self):
     for _ in range(2):
       self.api_builtin.print("Beginning %s files" % ("blueprint" if self.is_blueprint else "regular"))
       index = self.read_index()
@@ -44,6 +50,7 @@ class ModelEvaluator:
     self.api_builtin.print("Showing %d failed images" % len(failed))
     for file_name, guess in failed:
       self.api_builtin.print(guess)
+      self.api_builtin.print(file_name)
       folder = Folder.BLUEPRINT_FOLDER if self.is_blueprint else Folder.PREPROCESS_FOLDER
       img = self.api_cv2.imread(folder + file_name)
       gear_coord = int(file_name[1]), int(file_name[0])

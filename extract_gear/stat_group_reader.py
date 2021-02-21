@@ -53,6 +53,8 @@ class StatGroupReader:
   def build_num_from_digits(self, digit_predictions):
     num = 0
     for digit in digit_predictions:
+      if digit > 9:
+        continue
       num = num * 10
       num += digit
     return num

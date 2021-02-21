@@ -14,6 +14,7 @@ from api.api_time import ApiTime
 
 from extract_gear.card_reader import CardReader
 from extract_gear.collect_gear_task import CollectGearTask
+from extract_gear.create_index_task import CreateIndexTask
 from extract_gear.extract_gear import ExtractGear
 from extract_gear.image_split_collector import ImageSplitCollector
 from extract_gear.image_splitter import ImageSplitter
@@ -24,6 +25,7 @@ from extract_gear.set_type_reader import SetTypeReader
 from extract_gear.stat_group_reader import StatGroupReader
 
 from train.image_scaler import ImageScaler
+from train.train_task import TrainTask
 from train.train_stat_type import TrainStatType
 from train.train_stat_value import TrainStatValue
 
@@ -66,6 +68,13 @@ class Internal3(containers.DeclarativeContainer):
     Internal2.stat_group_reader, Internal2.set_type_reader)
 
 
+class Trainers(containers.DeclarativeContainer):
+  train_stat_value = providers.Singleton(TrainStatValue, Configs.config, Api1.api_builtin,
+    Api2.api_cv2, Api2.api_json, Api1.api_random, Api1.api_tensorflow, Internal1.image_scaler)
+  train_stat_type = providers.Singleton(TrainStatType, Configs.config, Api1.api_builtin,
+    Api2.api_cv2, Api2.api_json, Api1.api_random, Api1.api_tensorflow, Internal1.image_scaler)
+
+
 class TaskProvider(containers.DeclarativeContainer):
   image_split_task = providers.Singleton(ImageSplitCollector, Configs.config, Api1.api_builtin,
     Api2.api_cv2, Internal1.image_splitter)
@@ -75,10 +84,11 @@ class TaskProvider(containers.DeclarativeContainer):
     Api1.api_keyboard, Api2.api_pyautogui, Api1.api_time)
   index_task = providers.Singleton(Index, Configs.config, Api1.api_builtin, Api1.api_curses,
     Api2.api_cv2, Api2.api_json, Api1.api_time)
+  create_fast_index_task = providers.Singleton(CreateIndexTask, Api1.api_builtin, Api2.api_cv2,
+    Api2.api_json, Internal1.image_splitter, Internal1.preprocess_factory)
+
   extract_gear = providers.Singleton(ExtractGear, Api1.api_builtin, Api2.api_cv2,
     Api2.api_pyautogui, Api2.api_json, Api1.api_time, Api1.api_keyboard, Internal3.card_reader)
 
-  train_stat_value_task = providers.Singleton(TrainStatValue, Configs.config, Api1.api_builtin,
-    Api2.api_cv2, Api2.api_json, Api1.api_random, Api1.api_tensorflow, Internal1.image_scaler)
-  train_stat_type_task = providers.Singleton(TrainStatType, Configs.config, Api1.api_builtin,
-    Api2.api_cv2, Api2.api_json, Api1.api_random, Api1.api_tensorflow, Internal1.image_scaler)
+  train_task = providers.Singleton(TrainTask, Configs.config, Api1.api_builtin,
+    Trainers.train_stat_value, Trainers.train_stat_type)
