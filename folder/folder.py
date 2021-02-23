@@ -7,6 +7,8 @@ class Folder:
   BLUEPRINT_FOLDER = "data/blueprint/"
   ICON_CROP_FOLDER = "data/icon/"
   DIGIT_CROP_FOLDER = "data/digit/"
+  ROW_STANDARD_FOLDER = "data/row/standard/"
+  ROW_BLUEPRINT_FOLDER = "data/row/blueprint/"
 
   PREPROCESS_FOLDER = "data/preprocess/"
 
@@ -23,3 +25,9 @@ class Folder:
 
   STAT_TYPE_MODEL_FOLDER = "data/stat_type_model"
   STAT_VALUE_MODEL_FOLDER = "data/stat_value_model"
+
+  STANDARD_EMPTY_GEAR = "data/standard_empty_gear.png"
+  BLUEPRINT_EMPTY_GEAR = "data/blueprint_empty_gear.png"
+
+  BLUEPRINT_PAGE_INDEX = "data/row/blueprint_index.json"
+  STANDARD_PAGE_INDEX = "data/row/standard_index.json"

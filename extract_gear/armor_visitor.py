@@ -15,8 +15,10 @@ class ArmorVisitor:
   def iterate(self, callback):
     for page_num in range(1, self.num_pages + 1):
       page = self.create_page(page_num)
+      i = 0
       for coord in page:
-        callback(coord, page_num)
+        callback(coord, page_num, i)
+        i += 1
 
 
   def create_page(self, page_num):

@@ -20,6 +20,7 @@ from extract_gear.image_split_collector import ImageSplitCollector
 from extract_gear.image_splitter import ImageSplitter
 from extract_gear.index import Index
 from extract_gear.model_evaluator import ModelEvaluator
+from extract_gear.page_detector import PageDetector
 from extract_gear.preprocess_factory import PreprocessFactory
 from extract_gear.set_type_reader import SetTypeReader
 from extract_gear.stat_group_reader import StatGroupReader
@@ -57,6 +58,7 @@ class Internal1(containers.DeclarativeContainer):
 
 
 class Internal2(containers.DeclarativeContainer):
+  page_detector = providers.Singleton(PageDetector, Api2.api_cv2, Internal1.image_splitter)
   set_type_reader = providers.Singleton(SetTypeReader, Internal1.preprocess_factory,
     Api1.api_fuzzywuzzy, Api1.api_pytesseract)
   stat_group_reader = providers.Singleton(StatGroupReader, Internal1.preprocess_factory,
@@ -78,8 +80,8 @@ class Trainers(containers.DeclarativeContainer):
 class TaskProvider(containers.DeclarativeContainer):
   image_split_task = providers.Singleton(ImageSplitCollector, Configs.config, Api1.api_builtin,
     Api2.api_cv2, Internal1.image_splitter)
-  model_evaluator_task = providers.Singleton(ModelEvaluator, Api1.api_builtin, Api2.api_cv2,
-    Internal3.card_reader, Internal1.image_splitter)
+  model_evaluator_task = providers.Singleton(ModelEvaluator, Configs.config, Api1.api_builtin, Api2.api_cv2,
+    Api2.api_json, Internal3.card_reader, Internal1.image_splitter, Internal2.page_detector)
   collect_gear_task = providers.Singleton(CollectGearTask, Configs.config, Api1.api_builtin,
     Api1.api_keyboard, Api2.api_pyautogui, Api1.api_time)
   index_task = providers.Singleton(Index, Configs.config, Api1.api_builtin, Api1.api_curses,

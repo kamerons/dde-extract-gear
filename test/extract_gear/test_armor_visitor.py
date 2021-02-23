@@ -141,5 +141,5 @@ class CoordinateCollector:
     self.coordinates = []
 
 
-  def collect_coordinates_callback(self, gear_coord, page_num):
+  def collect_coordinates_callback(self, gear_coord, page_num, index):
     self.coordinates.append(gear_coord + (page_num,))

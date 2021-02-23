@@ -8,7 +8,8 @@ class ExtractGear:
   MAX_RECURSE = 3
 
 
-  def __init__(self, api_builtin, api_cv2, api_pyautogui, api_json, api_time, api_keyboard, card_reader):
+  def __init__(self, api_builtin, api_cv2, api_pyautogui, api_json, api_time, api_keyboard, card_reader,
+    page_detector):
     self.api_builtin = api_builtin
     self.api_cv2 = api_cv2
     self.api_pyautogui = api_pyautogui
@@ -16,6 +17,7 @@ class ExtractGear:
     self.api_time = api_time
     self.api_keyboard = api_keyboard
     self.card_reader = card_reader
+    self.page_detector = page_detector
 
 
   def run(self):
@@ -48,7 +50,7 @@ class ExtractGear:
   # We need to curry this function call so we can append to the index without making it
   # an instance variable on the class
   def get_add_data_to_index_fn(self, armor_type, is_blueprint, index, failed):
-    def true_callback(gear_coord, page_num):
+    def true_callback(gear_coord, page_num, index):
       return self.add_data_to_index(gear_coord, page_num, armor_type, is_blueprint, index, failed)
     return true_callback
 
@@ -80,3 +82,15 @@ class ExtractGear:
     data['is_blueprint'] = is_blueprint
     self.api_builtin.print(str(data))
     index.append(data)
+
+
+  def get_page_screenshots(self, gear_coord, page, is_blueprint, armor_iterator):
+    if page == final_page - 1:
+      self.pre_page_screenshot = self.api_pyautogui.screenshot(Fplder.TMP_FOLDER + "before_last_page.png")
+    elif page == final_page:
+      self.last_page_screenshot = self.api_pyautogui.screenshot(Folder.TMP_FOLDER + "last_page_screenshot.png")
+      start_row, end_row, end_col = self.page_detector.get_data_for_last_page(self.pre_page_screenshot,
+        self.last_page_screenshot, is_blueprint)
+      armor_iterator.last_page_col_end = end_col
+      armor_iterator.last_page_row_start = start_row
+      armor_iterator.last_page_row_end = end_row

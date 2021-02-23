@@ -1,4 +1,3 @@
-import json
 import numpy as np
 import os
 import sys
@@ -8,25 +7,60 @@ from folder.folder import Folder
 
 class ModelEvaluator:
 
-  def __init__(self, api_builtin, api_cv2, card_reader, image_splitter):
+  def __init__(self, args, api_builtin, api_cv2, api_json, card_reader, image_splitter, page_detector):
     self.api_builtin = api_builtin
     self.api_cv2 = api_cv2
     self.card_reader = card_reader
     self.image_splitter = image_splitter
+    self.api_json = api_json
     self.api_builtin.safe = True
     self.api_cv2.safe = True
     self.is_blueprint = False
+    self.api_json.safe = True
+    self.sub_task = args.command[1]
+    self.page_detector = page_detector
+
 
   def run(self):
-    self.api_builtin.print("Beginning model evaluation task.")
-    self.api_builtin.print("Model evaluation can only be run in safe mode")
-    self.api_builtin.input("Press enter to confirm")
-    self.evaluate_model()
+    if self.sub_task == "card":
+      self.api_builtin.print("Beginning model evaluation task.")
+      self.api_builtin.print("Model evaluation can only be run in safe mode")
+      self.api_builtin.input("Press enter to confirm")
+      self.evaluate_model()
+    elif self.sub_task == "page":
+      self.api_builtin.print("Beginning page evaluation task.")
+      self.api_builtin.print("Model evaluation can only be run in safe mode")
+      self.api_builtin.input("Press enter to confirm")
+      self.evaluate_page()
+    else:
+      self.api_builtin.print("Unrecognized subtask, valid values are: [card, page]")
+
+
+  def evaluate_page(self):
+    failed = []
+    for _ in range(2):
+      self.api_builtin.print("Beginning %s files" % ("blueprint" if self.is_blueprint else "standard"))
+      index_file = Folder.BLUEPRINT_PAGE_INDEX if self.is_blueprint else Folder.STANDARD_PAGE_INDEX
+      data_folder = Folder.ROW_BLUEPRINT_FOLDER if self.is_blueprint else Folder.ROW_STANDARD_FOLDER
+      with self.api_builtin.open(index_file, "r") as fp:
+        index = self.api_json.load(fp)
+      for data in index:
+        img_before = self.api_cv2.imread(data_folder + data['before'])
+        img_after = self.api_cv2.imread(data_folder + data['after'])
+        guess = self.page_detector.get_data_for_last_page(img_before, img_after, self.is_blueprint)
+        if guess[0] != data['start_row'] or guess[1] != data['end_row'] or guess[2] != data['end_col']:
+          data['blueprint'] = self.is_blueprint
+          failed.append((guess, data))
+      self.is_blueprint = not self.is_blueprint
+    self.api_builtin.print("failed for %d" %  len(failed))
+    for guess, expected in failed:
+      self.api_builtin.print("guessed: %s" % str(guess))
+      self.api_builtin.print("expected: %s" % str(expected))
 
 
   def evaluate_model(self):
     for _ in range(2):
-      self.api_builtin.print("Beginning %s files" % ("blueprint" if self.is_blueprint else "regular"))
+      self.api_builtin.print("Beginning %s files" % ("blueprint" if self.is_blueprint else "standard"))
       index = self.read_index()
       failed = self.get_failed(index)
       self.slideshow_failed(failed)
@@ -36,7 +70,7 @@ class ModelEvaluator:
   def read_index(self):
     file_name = Folder.BLUEPRINT_CARD_FILE if self.is_blueprint else Folder.CARD_FILE
     with open(file_name, "r") as fp:
-      return json.load(fp)
+      return self.api_json.load(fp)
 
 
   def get_failed(self, index):

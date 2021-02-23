@@ -77,6 +77,58 @@ class TestImageSplitter(unittest.TestCase):
       self.assertAllCoordsBut(images[i], [(0,0)], np.array([0], dtype=np.uint8))
 
 
+  def test_extractPageImages_standard(self):
+    #test the real row, column, and pass_fn
+    for attribute_name, attribute_value in TestImageSplitter.ORIGINAL_IMAGESPLITTER_ATTRIBUTES:
+      if attribute_name == "STADARD_PAGE_DATA":
+        orig_standard_data = attribute_value
+        break
+
+    ImageSplitter.STADARD_PAGE_DATA = ImageTypeData((2,2), (0,0), orig_standard_data.rows,
+      orig_standard_data.columns, orig_standard_data.pass_fn, (2,2))
+
+    img = np.full((6,10,1), 0, np.uint8)
+    expected_row1 = [(0,0), (0,2), (0,4), (0,6), (0,8)]
+    expected_row2 = [(2,0), (2,2), (2,4), (2,6), (2,8)]
+    expected_row3 = [(4,0), (4,2), (4,4), (4,6), (4,8)]
+    full_coords = expected_row1 + expected_row2 + expected_row3
+    for coord in full_coords:
+      img[coord] = 255
+    image_splitter = ImageSplitter()
+
+    images = image_splitter.extract_page_images(img, is_blueprint=False)
+
+    for i in range(15):
+      self.assertEqual(255, images[i][0,0])
+      self.assertAllCoordsBut(images[i], [(0,0)], np.array([0], dtype=np.uint8))
+
+
+  def test_extractPageImages_blueprint(self):
+    #test the real row, column, and pass_fn
+    for attribute_name, attribute_value in TestImageSplitter.ORIGINAL_IMAGESPLITTER_ATTRIBUTES:
+      if attribute_name == "BLUEPRINT_PAGE_DATA":
+        orig_blueprint_data = attribute_value
+        break
+
+    ImageSplitter.BLUEPRINT_PAGE_DATA = ImageTypeData((2,2), (0,0), orig_blueprint_data.rows,
+      orig_blueprint_data.columns, orig_blueprint_data.pass_fn, (2,2))
+
+    img = np.full((12,8,1), 0, np.uint8)
+    full_coords = []
+    for i in range(6):
+      full_coords += [(i*2,0), (i*2,2), (i*2,4), (i*2,6)]
+
+    for coord in full_coords:
+      img[coord] = 255
+    image_splitter = ImageSplitter()
+
+    images = image_splitter.extract_page_images(img, is_blueprint=True)
+
+    for i in range(24):
+      self.assertEqual(255, images[i][0,0])
+      self.assertAllCoordsBut(images[i], [(0,0)], np.array([0], dtype=np.uint8))
+
+
   def test_extractSetImage_usesCorrectData(self):
     ImageSplitter.SET_DATA = ImageTypeData((2,2), (0,0))
 
@@ -108,19 +160,20 @@ class TestImageSplitter(unittest.TestCase):
   def test_getSingleImageSplit_usesRelStart(self):
     end_coord = (1,3)
     image_type_data = ImageTypeData((1,1), end_coord)
+    group_data = ImageGroupData(0, 0, 0, 0)
 
     img = np.full((end_coord[0] + 1, end_coord[1] + 1, 1), 0, np.uint8)
     img[end_coord] = 255
     image_splitter = ImageSplitter()
 
-    split_img = image_splitter.get_single_image_split(img, (1,1), image_type_data)
+    split_img = image_splitter.get_single_image_split(img, (1,1), image_type_data, group_data)
 
     self.assertEqual(255, split_img[0,0][0])
 
 
   def test_getSingleImageSplit_usesGearCoord(self):
     image_type_data = ImageTypeData((1,1), (0,0))
-    ImageSplitter.STANDARD_GROUP_DATA = ImageGroupData(0, 0, 2, 1)
+    group_data = ImageGroupData(0, 0, 2, 1)
     gear_coord = (3,4)
     gear_offset= (2,1)
 
@@ -134,35 +187,21 @@ class TestImageSplitter(unittest.TestCase):
     img[(y_end_coord, x_end_coord)] = 255
     image_splitter = ImageSplitter()
 
-    split_img = image_splitter.get_single_image_split(img, gear_coord, image_type_data)
+    split_img = image_splitter.get_single_image_split(img, gear_coord, image_type_data, group_data)
 
     self.assertEqual(255, split_img[0,0][0])
 
 
-  def test_getSingleImageSplit_usesStandardStart(self):
+  def test_getSingleImageSplit_usesGroupData(self):
     image_type_data = ImageTypeData((1,1), (0,0))
     end_coord = (2,1)
-    ImageSplitter.STANDARD_GROUP_DATA = ImageGroupData(end_coord[0], end_coord[1], 0, 0)
+    group_data = ImageGroupData(end_coord[0], end_coord[1], 0, 0)
 
     img = np.full((end_coord[0]+1, end_coord[1]+1, 1), 0, np.uint8)
     img[end_coord] = 255
     image_splitter = ImageSplitter()
 
-    split_img = image_splitter.get_single_image_split(img, (1,1), image_type_data)
-
-    self.assertEqual(255, split_img[0,0][0])
-
-
-  def test_getSingleImageSplit_usesBlueprint(self):
-    image_type_data = ImageTypeData((1,1), (0,0))
-    end_coord = (2,1)
-    ImageSplitter.BLUEPRINT_GROUP_DATA = ImageGroupData(end_coord[0], end_coord[1], 0, 0)
-
-    img = np.full((end_coord[0]+1, end_coord[1]+1, 1), 0, np.uint8)
-    img[end_coord] = 255
-    image_splitter = ImageSplitter()
-
-    split_img = image_splitter.get_single_image_split(img, (1,1), image_type_data, blueprint=True)
+    split_img = image_splitter.get_single_image_split(img, (1,1), image_type_data, group_data)
 
     self.assertEqual(255, split_img[0,0][0])
 
@@ -172,6 +211,7 @@ class TestImageSplitter(unittest.TestCase):
       for col in range(img.shape[1]):
         if not (row,col) in coords:
           self.assertEqual(expected_color, img[row,col])
+
 
   def setZeroStart(self):
     ImageSplitter.STANDARD_GROUP_DATA = ImageGroupData(0, 0, 0, 0)

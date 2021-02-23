@@ -18,6 +18,18 @@ class ApiCv2:
       return cv2.imwrite(file_name, img)
 
 
+  def cvtColor(self, image, color):
+    return cv2.cvtColor(image, color)
+
+
+  def COLOR_BGR2GRAY(self):
+    return cv2.COLOR_BGR2GRAY
+
+
+  def calcHist(self, images, channels, mask, histSize, ranges):
+    return cv2.calcHist(images, channels, mask, histSize, ranges)
+
+
   def show_img(self, img, window_name="img", waitKey=0):
     if self.show_images:
       cv2.imshow(window_name, img)

@@ -45,7 +45,7 @@ class CollectGearTask:
 
 
   def get_screenshot_fn(self, folder):
-    def screenshot_callback(gear_coord, page):
+    def screenshot_callback(gear_coord, page, index):
       # small hack TODO add a debouncer
       self.api_keyboard.wait_for('o')
       self.api_keyboard.wait_for('p')
