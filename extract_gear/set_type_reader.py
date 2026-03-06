@@ -1,7 +1,6 @@
-class SetTypeReader:
+from extract_gear.constants import SET_TYPES
 
-  SET_TYPES = ["Chain Armor Set", "Dark Lord's Set", "Dragon Slayer Set",
-    "Goblin Raider Set", "Great Hero Set", "Leather Armor Set", "Knight Set", "Plate Armor Set"]
+class SetTypeReader:
 
   MIN_LEVENSHTEIN = 65
 
@@ -29,7 +28,7 @@ class SetTypeReader:
   def get_closet_armor_type_to_guess(self, guess):
     highest = 0
     highest_type = ""
-    for armor_type in SetTypeReader.SET_TYPES:
+    for armor_type in SET_TYPES:
       ratio = self.api_fuzzzywuzzy.ratio(armor_type.lower(), guess.lower())
       if ratio > highest:
         highest_type = armor_type

@@ -7,7 +7,7 @@ The Armor Selection System is a React + Python server application that helps use
 ## Core Requirements
 
 ### Key Constraints
-- **Complete Sets Only**: Armor must form a complete set (4 pieces from the same `armor_set`) to be considered, as set bonuses are significant
+- **Complete Sets Only**: Armor must form a complete set (4 pieces from the same `armor_set`) to be considered, as set bonuses are significant. Note: There are 7 armor types available, but only 4 are needed for a complete set.
 - **No Neural Networks**: Preference learning must be lightweight and instant (no training time)
 - **No LLM Integration**: All feedback is structured (buttons, no text input)
 - **Reactive Constraint Discovery**: Users discover constraints as they see recommendations, not upfront
@@ -748,11 +748,13 @@ From `extract_gear/index.py`:
 - `tower_hp`, `tower_dmg`, `tower_rate`, `tower_range`
 
 ### Armor Types
-From `extract_gear/extract_gear.py`:
+From `extract_gear/constants.py` (7 types total):
 - `shoulder_pad`, `mask`, `hat`, `greaves`, `shield`, `bracer`, `belt`
 
+Note: A complete armor set requires 4 pieces from the same set, but there are 7 possible armor types. Any combination of 4 different armor types from the same set forms a complete set.
+
 ### Set Types
-From `extract_gear/set_type_reader.py`:
+From `extract_gear/constants.py` (8 types total):
 - `Chain Armor Set`, `Dark Lord's Set`, `Dragon Slayer Set`
 - `Goblin Raider Set`, `Great Hero Set`, `Leather Armor Set`
 - `Knight Set`, `Plate Armor Set`

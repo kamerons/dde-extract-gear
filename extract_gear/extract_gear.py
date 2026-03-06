@@ -1,10 +1,10 @@
 from extract_gear.armor_visitor import ArmorVisitor
+from extract_gear.constants import ARMOR_TYPES
 
 from folder.folder import Folder
 
 class ExtractGear:
 
-  ARMOR_TYPES = ["shoulder_pad", "mask", "hat", "greaves", "shield", "bracer", "belt"]
   MAX_RECURSE = 3
 
 
@@ -28,7 +28,7 @@ class ExtractGear:
       num_col = 4 if is_blueprint else 5
       num_row = 6 if is_blueprint else 3
       self.api_builtin.print("Is blueprint is: %s" % str(is_blueprint))
-      for armor_type in ExtractGear.ARMOR_TYPES:
+      for armor_type in ARMOR_TYPES:
         self.api_builtin.input(
           "Beginning collection for %s.  Press enter when ready." % armor_type)
         final_page = self.api_builtin.input_safe_int("Enter the number of pages\n> ")

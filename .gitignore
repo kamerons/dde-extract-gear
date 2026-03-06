@@ -5,3 +5,5 @@ env
 *.json
 data/*model
 .vscode
+
+venv/
