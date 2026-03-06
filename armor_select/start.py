@@ -27,11 +27,13 @@ def check_docker():
         return False
 
 
-def get_compose_file():
-    """Get the path to docker-compose.yml."""
+def get_compose_files():
+    """Get paths to docker-compose.yml and docker-compose.dev.yml for dev mode."""
     script_dir = Path(__file__).parent
-    compose_file = script_dir / "docker" / "docker-compose.yml"
-    return compose_file.absolute()
+    docker_dir = script_dir / "docker"
+    base = (docker_dir / "docker-compose.yml").absolute()
+    dev = (docker_dir / "docker-compose.dev.yml").absolute()
+    return base, dev
 
 
 def get_project_root():
@@ -42,38 +44,45 @@ def get_project_root():
 
 
 def start_containers():
-    """Start all Docker containers."""
+    """Start all Docker containers in dev mode (API hot-reload, source mounted)."""
     if not check_docker():
         print("✗ ERROR: Docker is not installed or not available in PATH")
         print("  Please install Docker and Docker Compose to continue.")
         sys.exit(1)
 
-    compose_file = get_compose_file()
-    if not compose_file.exists():
-        print(f"✗ ERROR: docker-compose.yml not found at {compose_file}")
+    base_file, dev_file = get_compose_files()
+    if not base_file.exists():
+        print(f"✗ ERROR: docker-compose.yml not found at {base_file}")
+        sys.exit(1)
+    if not dev_file.exists():
+        print(f"✗ ERROR: docker-compose.dev.yml not found at {dev_file}")
         sys.exit(1)
 
-    print("Starting Docker containers...")
-    print(f"Using compose file: {compose_file}")
+    print("Starting Docker containers (dev mode)...")
+    print(f"  Base: {base_file}")
+    print(f"  Dev:  {dev_file}")
+    print("\n  API: http://localhost:8000  (hot-reload on)")
+    print("  Redis: localhost:6379")
+    print("  Frontend: disabled in dev — run 'npm run dev' in armor_select/frontend for Vite HMR")
+    print("  Stop with Ctrl+C, or run: python start.py stop\n")
 
     try:
-        # Change to project root (where docker-compose.yml context should be)
         project_root = get_project_root()
         os.chdir(project_root)
 
-        result = subprocess.run(
-            ["docker", "compose", "-f", str(compose_file), "up", "-d", "--build"],
+        # -f base -f dev: API gets --reload + source mount; foreground so logs are visible
+        subprocess.run(
+            [
+                "docker", "compose",
+                "-f", str(base_file),
+                "-f", str(dev_file),
+                "up", "--build",
+            ],
             check=True,
-            text=True
+            text=True,
         )
 
-        print("✓ Containers started successfully")
-        print("\nServices:")
-        print("  - Frontend: http://localhost:3000")
-        print("  - API: http://localhost:8000")
-        print("  - Redis: localhost:6379")
-        print("\nTo view logs: docker compose -f docker/docker-compose.yml logs -f")
-        print("To stop: python start.py stop")
+        print("✓ Containers stopped (Ctrl+C)")
 
     except subprocess.CalledProcessError as e:
         print(f"✗ ERROR: Failed to start containers: {e}")
@@ -81,27 +90,34 @@ def start_containers():
 
 
 def stop_containers():
-    """Stop all Docker containers."""
+    """Stop all Docker containers (must use same compose files as start)."""
     if not check_docker():
         print("✗ ERROR: Docker is not installed or not available in PATH")
         sys.exit(1)
 
-    compose_file = get_compose_file()
-    if not compose_file.exists():
-        print(f"✗ ERROR: docker-compose.yml not found at {compose_file}")
+    base_file, dev_file = get_compose_files()
+    if not base_file.exists():
+        print(f"✗ ERROR: docker-compose.yml not found at {base_file}")
+        sys.exit(1)
+    if not dev_file.exists():
+        print(f"✗ ERROR: docker-compose.dev.yml not found at {dev_file}")
         sys.exit(1)
 
     print("Stopping Docker containers...")
 
     try:
-        # Change to project root (where docker-compose.yml context should be)
         project_root = get_project_root()
         os.chdir(project_root)
 
-        result = subprocess.run(
-            ["docker", "compose", "-f", str(compose_file), "down"],
+        subprocess.run(
+            [
+                "docker", "compose",
+                "-f", str(base_file),
+                "-f", str(dev_file),
+                "down",
+            ],
             check=True,
-            text=True
+            text=True,
         )
 
         print("✓ Containers stopped successfully")

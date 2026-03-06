@@ -5,7 +5,7 @@ import math
 import time
 import heapq
 from functools import lru_cache
-from typing import Dict, List, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 from itertools import product
 
 from armor_select.shared.constraint_manager import ConstraintManager
@@ -16,6 +16,11 @@ logger = logging.getLogger(__name__)
 
 class TooManyCombinationsError(Exception):
     """Raised when the number of combinations to evaluate exceeds the limit."""
+    pass
+
+
+class TaskCancelledError(Exception):
+    """Raised when the current task has been cancelled (e.g. a new task was started)."""
     pass
 
 
@@ -310,20 +315,26 @@ class RecommendationEngine:
         weights: Dict[str, float],
         constraints: Dict[str, int],
         limit: int = 10,
-        timeout_seconds: float = 10.0
+        timeout_seconds: Optional[float] = None,
+        progress_callback: Optional[Callable[[int, int, Optional[List[Dict]]], None]] = None,
+        check_cancelled: Optional[Callable[[], bool]] = None
     ) -> List[Tuple[float, List[Dict], Dict[str, int]]]:
         """
-        Evaluate combinations depth-first with timeout and priority queue.
+        Evaluate combinations depth-first with priority queue.
 
         Uses ordered exploration (sorted pieces) to evaluate best combinations first.
-        Maintains a priority queue of top N results and stops early on timeout.
+        Maintains a priority queue of top N results. Runs to completion unless
+        timeout_seconds is set or check_cancelled returns True.
 
         Args:
             pieces_by_armor_type: Dictionary mapping armor types to lists of pieces
             weights: Dictionary mapping stat names to weights
             constraints: Dictionary mapping stat names to minimum values
             limit: Maximum number of results to return
-            timeout_seconds: Maximum time to spend evaluating (default: 10.0)
+            timeout_seconds: Maximum time to spend evaluating (None = run to completion)
+            progress_callback: Optional callback (evaluated, total_planned, partial_results)
+                called periodically; partial_results is current top-N formatted or None.
+            check_cancelled: Optional callback; if it returns True, stop and return best-so-far
 
         Returns:
             List of tuples (score, pieces_list, stats_dict) sorted by score (best first)
@@ -346,23 +357,44 @@ class RecommendationEngine:
         evaluated = 0
         last_log_time = start_time
         last_log_count = 0
+        last_callback_time = start_time
         counter = 0  # Tie-breaker for heap comparison
 
         # Iterate through combinations using sorted pieces
         armor_types = list(sorted_pieces.keys())
         for combo in product(*[sorted_pieces[at] for at in armor_types]):
-            # Check timeout
-            elapsed = time.time() - start_time
-            if elapsed >= timeout_seconds:
-                remaining = total_planned - evaluated
-                logger.info(
-                    f"Timeout reached after {elapsed:.2f}s. "
-                    f"Evaluated {evaluated}/{total_planned} combinations. "
-                    f"Remaining: {remaining}. Returning best results found so far."
-                )
-                break
+            # Optional timeout
+            if timeout_seconds is not None:
+                elapsed = time.time() - start_time
+                if elapsed >= timeout_seconds:
+                    remaining = total_planned - evaluated
+                    logger.info(
+                        f"Timeout reached after {elapsed:.2f}s. "
+                        f"Evaluated {evaluated}/{total_planned} combinations. "
+                        f"Remaining: {remaining}. Returning best results found so far."
+                    )
+                    break
 
             evaluated += 1
+
+            # Progress callback periodically (every 1000 evaluations or every 0.5s)
+            if progress_callback is not None:
+                current_time = time.time()
+                if (evaluated - last_log_count >= 1000) or (current_time - last_callback_time >= 0.5):
+                    partial = None
+                    if heap:
+                        sorted_heap = sorted(heap, key=lambda x: -x[0])
+                        partial = [
+                            self._format_scored_set(combo_list, stats, score, idx)
+                            for idx, (score, _, combo_list, stats) in enumerate(sorted_heap[:limit])
+                        ]
+                    progress_callback(evaluated, total_planned, partial)
+                    last_callback_time = current_time
+
+            # Check for cancellation
+            if check_cancelled is not None and check_cancelled():
+                logger.info(f"Task cancelled after {evaluated}/{total_planned} combinations")
+                raise TaskCancelledError()
 
             # Log progress periodically (every 10000 evaluations or every 10 seconds)
             current_time = time.time()
@@ -391,6 +423,17 @@ class RecommendationEngine:
             elif score > heap[0][0]:
                 heapq.heapreplace(heap, (score, counter, combo_list, stats))
 
+        # Final progress callback (include partial results if any)
+        if progress_callback is not None:
+            partial = None
+            if heap:
+                sorted_heap = sorted(heap, key=lambda x: -x[0])
+                partial = [
+                    self._format_scored_set(combo_list, stats, score, idx)
+                    for idx, (score, _, combo_list, stats) in enumerate(sorted_heap[:limit])
+                ]
+            progress_callback(evaluated, total_planned, partial)
+
         # Return top results sorted by score (best first)
         results = [(score, pieces, stats) for score, _, pieces, stats in heap]
         results.sort(reverse=True, key=lambda x: x[0])
@@ -412,11 +455,48 @@ class RecommendationEngine:
         piece_ids = '_'.join(sorted([p.get('id', '') for p in pieces]))
         return f"{set_type.lower().replace(' ', '_')}_{index}_{hash(piece_ids) % 10000}"
 
+    def _format_scored_set(
+        self,
+        armor_set: List[Dict],
+        aggregated_stats: Dict[str, int],
+        score: float,
+        idx: int
+    ) -> Dict:
+        """Format a single (armor_set, stats, score) as a recommendation dict."""
+        set_id = self.generate_set_id(armor_set, idx)
+        formatted_pieces = []
+        for piece in armor_set:
+            piece_stats = {
+                stat: piece.get(stat, 0)
+                for stat in self.STAT_TYPES
+                if isinstance(piece.get(stat, 0), (int, float))
+            }
+            formatted_pieces.append({
+                'armor_set': piece.get('armor_set', ''),
+                'armor_type': piece.get('armor_type', ''),
+                'current_level': piece.get('current_level', 1),
+                'max_level': piece.get('max_level', 16),
+                'stats': piece_stats
+            })
+        return {
+            'set_id': set_id,
+            'pieces': formatted_pieces,
+            'current_stats': aggregated_stats,
+            'upgraded_stats': aggregated_stats.copy(),
+            'effective_stats': aggregated_stats.copy(),
+            'wasted_points': {stat: 0 for stat in self.STAT_TYPES},
+            'score': score,
+            'potential_score': 0.0,
+            'flexibility_score': 0.0,
+        }
+
     def get_recommendations(
         self,
         weights: Dict[str, float],
         constraints: Dict[str, int],
-        limit: int = 10
+        limit: int = 10,
+        progress_callback: Optional[Callable[[int, int, Optional[List[Dict]]], None]] = None,
+        check_cancelled: Optional[Callable[[], bool]] = None
     ) -> List[Dict]:
         """
         Get top armor set recommendations.
@@ -425,6 +505,9 @@ class RecommendationEngine:
             weights: Dictionary mapping stat names to weights
             constraints: Dictionary mapping stat names to minimum values
             limit: Maximum number of recommendations to return
+            progress_callback: Optional callback (evaluated, total_planned, partial_results)
+                called after each set completes; partial_results is top-N list so far.
+            check_cancelled: Optional callback; if it returns True, stop and return best-so-far
 
         Returns:
             List of recommendation dictionaries
@@ -442,12 +525,10 @@ class RecommendationEngine:
                 sets_by_type[set_type].append(piece)
 
         # Filter out dominated pieces to reduce combination count
-        # For each (armor_set, armor_type) group, remove pieces that are strictly worse
         original_piece_count = sum(len(pieces) for pieces in sets_by_type.values())
         filtered_piece_count = 0
 
         for set_type, pieces in sets_by_type.items():
-            # Group pieces by armor_type within this set
             pieces_by_armor_type: Dict[str, List[Dict]] = {}
             for piece in pieces:
                 armor_type = piece.get('armor_type')
@@ -456,14 +537,12 @@ class RecommendationEngine:
                         pieces_by_armor_type[armor_type] = []
                     pieces_by_armor_type[armor_type].append(piece)
 
-            # Filter dominated pieces for each armor type
             filtered_by_armor_type: Dict[str, List[Dict]] = {}
             for armor_type, armor_pieces in pieces_by_armor_type.items():
                 filtered_pieces = self.filter_dominated_pieces(armor_pieces)
                 filtered_by_armor_type[armor_type] = filtered_pieces
                 filtered_piece_count += len(filtered_pieces)
 
-            # Update sets_by_type with filtered pieces
             sets_by_type[set_type] = []
             for armor_type, filtered_pieces in filtered_by_armor_type.items():
                 sets_by_type[set_type].extend(filtered_pieces)
@@ -475,75 +554,85 @@ class RecommendationEngine:
                 f"({original_piece_count} -> {filtered_piece_count})"
             )
 
-        # Process each set with optimizations
-        all_scored_sets = []
-
+        # Build list of (set_type, pieces_by_armor_type) we will process and total_planned per set
+        sets_to_process: List[Tuple[str, Dict[str, List[Dict]]]] = []
         for set_type, pieces in sets_by_type.items():
-            # Group pieces by armor_type within this set (re-group after filtering)
-            pieces_by_armor_type: Dict[str, List[Dict]] = {}
+            pieces_by_armor_type = {}
             for piece in pieces:
                 armor_type = piece.get('armor_type')
                 if armor_type:
                     if armor_type not in pieces_by_armor_type:
                         pieces_by_armor_type[armor_type] = []
                     pieces_by_armor_type[armor_type].append(piece)
-
-            # Need all 7 armor types to form a complete set
             if len(pieces_by_armor_type) != 7:
                 continue
-
-            # Apply constraint-based pruning (Strategy 1)
             if not self.can_set_satisfy_constraints(pieces_by_armor_type, constraints):
                 logger.info(
                     f"Skipping set '{set_type}': cannot satisfy constraints even with best pieces"
                 )
                 continue
+            sets_to_process.append((set_type, pieces_by_armor_type))
 
-            # Use depth-first search with ordered exploration and timeout
+        total_planned_global = 0
+        for _set_type, pbat in sets_to_process:
+            n = 1
+            for armor_type in pbat:
+                n *= len(pbat[armor_type])
+            total_planned_global += n
+
+        # Process each set with optimizations
+        all_scored_sets: List[Dict] = []
+        evaluated_so_far = 0
+
+        for set_type, pieces_by_armor_type in sets_to_process:
+            if check_cancelled is not None and check_cancelled():
+                logger.info("Task cancelled between sets")
+                raise TaskCancelledError()
+
+            total_this_set = 1
+            for armor_type in pieces_by_armor_type:
+                total_this_set *= len(pieces_by_armor_type[armor_type])
+
+            def make_progress_callback():
+                _evaluated_before = evaluated_so_far
+                _total_global = total_planned_global
+                def cb(
+                    evaluated_this: int,
+                    _total_this: int,
+                    partial_list: Optional[List[Dict]] = None,
+                ) -> None:
+                    if progress_callback is not None:
+                        progress_callback(
+                            _evaluated_before + evaluated_this,
+                            _total_global,
+                            partial_list,
+                        )
+                return cb
+
+            # Run to completion (no timeout)
             results = self.depth_first_recommendations(
                 pieces_by_armor_type,
                 weights,
                 constraints,
                 limit=limit,
-                timeout_seconds=10.0
+                timeout_seconds=None,
+                progress_callback=make_progress_callback() if progress_callback else None,
+                check_cancelled=check_cancelled
             )
 
             # Format results for this set
             for idx, (score, armor_set, aggregated_stats) in enumerate(results):
-                # Generate set ID
-                set_id = self.generate_set_id(armor_set, idx)
+                all_scored_sets.append(
+                    self._format_scored_set(armor_set, aggregated_stats, score, idx)
+                )
 
-                # Format pieces for response
-                formatted_pieces = []
-                for piece in armor_set:
-                    # Extract stats from piece
-                    piece_stats = {
-                        stat: piece.get(stat, 0)
-                        for stat in self.STAT_TYPES
-                        if isinstance(piece.get(stat, 0), (int, float))
-                    }
-                    formatted_pieces.append({
-                        'armor_set': piece.get('armor_set', ''),
-                        'armor_type': piece.get('armor_type', ''),
-                        'current_level': piece.get('current_level', 1),
-                        'max_level': piece.get('max_level', 16),
-                        'stats': piece_stats
-                    })
+            evaluated_so_far += total_this_set
 
-                # For Phase 1, use same stats for all stat fields
-                # (upgraded_stats, effective_stats, wasted_points will be
-                # implemented in Phase 2/3)
-                all_scored_sets.append({
-                    'set_id': set_id,
-                    'pieces': formatted_pieces,
-                    'current_stats': aggregated_stats,
-                    'upgraded_stats': aggregated_stats.copy(),  # Placeholder
-                    'effective_stats': aggregated_stats.copy(),  # Placeholder
-                    'wasted_points': {stat: 0 for stat in self.STAT_TYPES},  # Placeholder
-                    'score': score,
-                    'potential_score': 0.0,  # Placeholder for Phase 3
-                    'flexibility_score': 0.0,  # Placeholder for Phase 3
-                })
+            # Merge and take top N, then report partial results
+            all_scored_sets.sort(key=lambda x: x['score'], reverse=True)
+            partial = all_scored_sets[:limit]
+            if progress_callback is not None:
+                progress_callback(evaluated_so_far, total_planned_global, partial)
 
         # Sort by score (descending) and return top N
         all_scored_sets.sort(key=lambda x: x['score'], reverse=True)

@@ -10,6 +10,7 @@ from typing import Dict, Optional
 import redis
 from armor_select.task.config import Config
 from armor_select.task.processors.recommendation_processor import RecommendationProcessor
+from armor_select.shared.recommendation_engine import TaskCancelledError
 
 # Configure logging
 logging.basicConfig(
@@ -20,9 +21,11 @@ logger = logging.getLogger(__name__)
 
 
 class TaskWorker:
-    """Worker that processes tasks from Redis queue."""
+    """Worker that processes tasks from Redis queue. Only one task runs at a time."""
 
     QUEUE_NAME = "recommendation_tasks"
+    CURRENT_TASK_KEY = "recommendation_current_task_id"
+    CURRENT_TASK_EXPIRY = 3600  # seconds (clears if worker dies)
     POLL_INTERVAL = 1.0  # seconds
 
     def __init__(self):
@@ -71,19 +74,56 @@ class TaskWorker:
                 3600,  # 1 hour expiry
                 json.dumps(results)
             )
-        elif status == "failed" and error:
+        elif status in ("failed", "cancelled") and error:
             self.redis_client.setex(
                 error_key,
                 3600,  # 1 hour expiry
                 error
             )
 
-    def process_task(self, task_data: Dict) -> None:
+    def update_task_progress(
+        self,
+        task_id: str,
+        evaluated: int,
+        total_planned: int,
+        partial_results: Optional[Dict] = None
+    ) -> None:
         """
-        Process a single task.
+        Update task progress and optionally partial results in Redis.
+        Does not change status (task remains "processing").
 
         Args:
-            task_data: Task data dictionary with task_id, weights, constraints, limit
+            task_id: Task ID
+            evaluated: Number of combinations evaluated so far
+            total_planned: Total number of combinations to evaluate
+            partial_results: Optional {"recommendations": [...], "count": N}
+        """
+        meta_key = f"task:{task_id}:meta"
+        result_key = f"task:{task_id}:result"
+
+        self.redis_client.hset(meta_key, mapping={
+            "evaluated": str(evaluated),
+            "total_planned": str(total_planned),
+        })
+
+        if partial_results is not None:
+            self.redis_client.setex(
+                result_key,
+                3600,
+                json.dumps(partial_results)
+            )
+
+    def _clear_current_task(self) -> None:
+        """Clear the current-processing task id in Redis."""
+        try:
+            self.redis_client.delete(self.CURRENT_TASK_KEY)
+        except Exception as e:
+            logger.warning(f"Failed to clear current task key: {e}")
+
+    def process_task(self, task_data: Dict) -> None:
+        """
+        Process a single task. Only one task runs at a time; if this task was
+        cancelled (a new task was started), status is set to cancelled.
         """
         task_id = task_data["task_id"]
         weights = json.loads(task_data["weights"])
@@ -92,22 +132,52 @@ class TaskWorker:
 
         logger.info(f"Processing task {task_id}")
 
+        # Claim as the current processing task (so API can cancel it when a new one is created)
+        self.redis_client.setex(
+            self.CURRENT_TASK_KEY,
+            self.CURRENT_TASK_EXPIRY,
+            task_id
+        )
+
         # Update status to processing
         self.update_task_status(task_id, "processing")
 
+        def progress_callback(
+            evaluated: int,
+            total_planned: int,
+            partial_results: Optional[Dict]
+        ) -> None:
+            self.update_task_progress(
+                task_id,
+                evaluated=evaluated,
+                total_planned=total_planned,
+                partial_results=partial_results
+            )
+
+        def check_cancelled() -> bool:
+            cancelled = self.redis_client.get(f"task:{task_id}:cancelled")
+            return cancelled == "1"
+
         try:
-            # Process recommendation
             results = self.processor.process(
                 weights=weights,
                 constraints=constraints,
-                limit=limit
+                limit=limit,
+                progress_callback=progress_callback,
+                check_cancelled=check_cancelled
             )
 
-            # Update status to completed
+            self._clear_current_task()
             self.update_task_status(task_id, "completed", results=results)
             logger.info(f"Completed task {task_id}")
 
+        except TaskCancelledError:
+            self._clear_current_task()
+            self.update_task_status(task_id, "cancelled", error="Cancelled (a new task was started)")
+            logger.info(f"Task {task_id} was cancelled")
+
         except Exception as e:
+            self._clear_current_task()
             error_msg = str(e)
             logger.error(f"Failed to process task {task_id}: {error_msg}")
             self.update_task_status(task_id, "failed", error=error_msg)

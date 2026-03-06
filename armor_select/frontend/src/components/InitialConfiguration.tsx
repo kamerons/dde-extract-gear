@@ -1,19 +1,18 @@
 import { useState } from 'react';
-import type { StatType, BuildPreferences, Recommendation } from '../types';
+import type { StatType, BuildPreferences } from '../types';
 import { StatMultiSelect } from './StatMultiSelect';
 import { StatNumberInput } from './StatNumberInput';
-import { submitInitialPreferencesWithPolling } from '../api/recommendations';
 
 interface InitialConfigurationProps {
-  onPreferencesSubmitted: (recommendations: Recommendation[]) => void;
-  onLoadingChange?: (isLoading: boolean) => void;
+  onNavigateToResults: (preferences: BuildPreferences) => void;
   onError?: (error: string | null) => void;
+  error?: string | null;
 }
 
 export function InitialConfiguration({
-  onPreferencesSubmitted,
-  onLoadingChange,
+  onNavigateToResults,
   onError,
+  error: configError,
 }: InitialConfigurationProps) {
   const [maximizeStats, setMaximizeStats] = useState<StatType[]>([]);
   const [ignoreStats, setIgnoreStats] = useState<StatType[]>([]);
@@ -54,9 +53,7 @@ export function InitialConfiguration({
     setSoftCaps(newSoftCaps);
   };
 
-  const handleSubmit = async () => {
-    setIsSubmitting(true);
-    onLoadingChange?.(true);
+  const handleSubmit = () => {
     onError?.(null);
 
     const preferences: BuildPreferences = {
@@ -66,25 +63,9 @@ export function InitialConfiguration({
       softCaps,
     };
 
-    try {
-      const response = await submitInitialPreferencesWithPolling(
-        preferences,
-        (status) => {
-          // Optional: show progress updates
-          if (status.status === 'processing') {
-            console.log('Processing recommendations...');
-          }
-        }
-      );
-      onPreferencesSubmitted(response.recommendations);
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Failed to fetch recommendations';
-      console.error('Error submitting preferences:', error);
-      onError?.(errorMessage);
-    } finally {
-      setIsSubmitting(false);
-      onLoadingChange?.(false);
-    }
+    setIsSubmitting(true);
+    onNavigateToResults(preferences);
+    setIsSubmitting(false);
   };
 
   return (
@@ -142,6 +123,11 @@ export function InitialConfiguration({
       </div>
 
       <div className="configuration-footer">
+        {configError && (
+          <p className="configuration-error" role="alert">
+            {configError}
+          </p>
+        )}
         <button
           onClick={handleSubmit}
           disabled={isSubmitting}

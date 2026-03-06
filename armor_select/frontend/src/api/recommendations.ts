@@ -13,8 +13,9 @@ export interface RecommendationResponse {
 
 export interface TaskResponse {
   task_id: string;
-  status: 'pending' | 'processing' | 'completed' | 'failed' | 'not_found';
+  status: 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled' | 'not_found';
   results?: RecommendationResponse;
+  progress?: { evaluated: number; total_planned: number };
   error?: string;
   created_at?: string;
 }
@@ -129,23 +130,19 @@ export async function getTaskStatus(taskId: string): Promise<TaskResponse> {
   return data;
 }
 
+export const POLL_INTERVAL_MS = 1500;
+
 /**
  * Submit preferences and poll for results until completed.
- * Polls every 1-2 seconds until the task is completed or failed.
+ * Polls until the task is completed or failed (no timeout).
  */
 export async function submitInitialPreferencesWithPolling(
   preferences: BuildPreferences,
   onProgress?: (status: TaskResponse) => void
 ): Promise<RecommendationResponse> {
-  // Create task
   const taskId = await submitInitialPreferencesAsync(preferences);
 
-  // Poll for results
-  const pollInterval = 1500; // 1.5 seconds
-  const maxAttempts = 120; // 2 minutes max
-  let attempts = 0;
-
-  while (attempts < maxAttempts) {
+  for (;;) {
     const status = await getTaskStatus(taskId);
 
     if (onProgress) {
@@ -160,10 +157,6 @@ export async function submitInitialPreferencesWithPolling(
       throw new Error(status.error || 'Task failed');
     }
 
-    // Wait before next poll
-    await new Promise((resolve) => setTimeout(resolve, pollInterval));
-    attempts++;
+    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
   }
-
-  throw new Error('Task polling timeout');
 }

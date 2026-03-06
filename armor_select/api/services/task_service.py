@@ -1,4 +1,4 @@
-"""Task service for managing recommendation tasks in Redis."""
+"""Task service for managing recommendation tasks in Redis. Only one task runs at a time."""
 
 import json
 import uuid
@@ -16,6 +16,8 @@ class TaskService:
     """Service for managing tasks in Redis."""
 
     TASK_EXPIRY_SECONDS = 3600  # 1 hour
+    CURRENT_TASK_KEY = "recommendation_current_task_id"
+    QUEUE_KEY = "recommendation_tasks"
 
     def __init__(self):
         """Initialize task service with Redis connection."""
@@ -35,7 +37,8 @@ class TaskService:
         limit: int = 10
     ) -> str:
         """
-        Create a new recommendation task.
+        Create a new recommendation task. Cancels any currently running task and
+        clears the queue so only this task runs (one task at a time).
 
         Args:
             weights: Dictionary mapping stat names to weights
@@ -47,6 +50,19 @@ class TaskService:
         """
         task_id = str(uuid.uuid4())
 
+        # Cancel the currently processing task (if any)
+        current_id = self.redis_client.get(self.CURRENT_TASK_KEY)
+        if current_id:
+            self.redis_client.setex(
+                f"task:{current_id}:cancelled",
+                self.TASK_EXPIRY_SECONDS,
+                "1"
+            )
+            logger.info(f"Cancelled previous task {current_id} in favour of {task_id}")
+
+        # Clear the queue so only the new task will run
+        self.redis_client.delete(self.QUEUE_KEY)
+
         # Store task metadata
         task_meta = {
             "task_id": task_id,
@@ -57,20 +73,18 @@ class TaskService:
             "created_at": datetime.utcnow().isoformat(),
         }
 
-        # Store in Redis with expiry
         meta_key = f"task:{task_id}:meta"
         self.redis_client.hset(meta_key, mapping=task_meta)
         self.redis_client.expire(meta_key, self.TASK_EXPIRY_SECONDS)
 
-        # Add task to queue
-        queue_key = "recommendation_tasks"
+        # Add only this task to the queue
         task_data = {
             "task_id": task_id,
             "weights": json.dumps(weights),
             "constraints": json.dumps(constraints),
             "limit": limit,
         }
-        self.redis_client.rpush(queue_key, json.dumps(task_data))
+        self.redis_client.rpush(self.QUEUE_KEY, json.dumps(task_data))
 
         logger.info(f"Created task {task_id}")
         return task_id
@@ -104,16 +118,29 @@ class TaskService:
             "created_at": meta.get("created_at"),
         }
 
-        # If completed, get results
-        if status == "completed":
+        # Progress (while processing or completed)
+        evaluated_str = meta.get("evaluated")
+        total_planned_str = meta.get("total_planned")
+        if evaluated_str is not None and total_planned_str is not None:
+            try:
+                response["progress"] = {
+                    "evaluated": int(evaluated_str),
+                    "total_planned": int(total_planned_str),
+                }
+            except (ValueError, TypeError):
+                pass
+
+        # Results: when completed, or partial results when still processing
+        if status == "completed" or status == "processing":
             result_data = self.redis_client.get(result_key)
             if result_data:
                 try:
                     response["results"] = json.loads(result_data)
                 except json.JSONDecodeError:
-                    response["error"] = "Failed to parse results"
-                    response["status"] = "failed"
-        elif status == "failed":
+                    if status == "completed":
+                        response["error"] = "Failed to parse results"
+                        response["status"] = "failed"
+        elif status in ("failed", "cancelled"):
             error_data = self.redis_client.get(f"task:{task_id}:error")
             if error_data:
                 response["error"] = error_data

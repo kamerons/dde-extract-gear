@@ -1,44 +1,41 @@
 import { useState } from 'react';
 import { InitialConfiguration } from './components/InitialConfiguration';
 import { ResultsScreen } from './components/ResultsScreen';
-import type { Recommendation } from './types';
+import type { BuildPreferences } from './types';
 import './App.css';
 
 type View = 'configuration' | 'results';
 
 function App() {
   const [currentView, setCurrentView] = useState<View>('configuration');
-  const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [pendingPreferences, setPendingPreferences] = useState<BuildPreferences | null>(null);
+  const [configError, setConfigError] = useState<string | null>(null);
 
-  const handlePreferencesSubmitted = async (recommendationsData: Recommendation[]) => {
-    setRecommendations(recommendationsData);
-    setError(null);
+  const handleNavigateToResults = (preferences: BuildPreferences) => {
+    setConfigError(null);
+    setPendingPreferences(preferences);
     setCurrentView('results');
   };
 
   const handleBackToConfiguration = () => {
+    setPendingPreferences(null);
     setCurrentView('configuration');
-    setError(null);
   };
 
-  if (currentView === 'results') {
+  if (currentView === 'results' && pendingPreferences) {
     return (
       <ResultsScreen
-        recommendations={recommendations}
+        initialPreferences={pendingPreferences}
         onBack={handleBackToConfiguration}
-        isLoading={isLoading}
-        error={error}
       />
     );
   }
 
   return (
     <InitialConfiguration
-      onPreferencesSubmitted={handlePreferencesSubmitted}
-      onLoadingChange={setIsLoading}
-      onError={setError}
+      onNavigateToResults={handleNavigateToResults}
+      onError={setConfigError}
+      error={configError}
     />
   );
 }
