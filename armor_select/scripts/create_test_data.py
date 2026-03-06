@@ -24,8 +24,8 @@ def create_test_collected_json(
         random.seed(seed)
 
     # Get absolute path relative to repo root
-    # From armor_select/backend/create_test_data.py:
-    # .parent = armor_select/backend
+    # From armor_select/scripts/create_test_data.py:
+    # .parent = armor_select/scripts
     # .parent.parent = armor_select
     # .parent.parent.parent = repo root (dde-extract-gear)
     repo_root = Path(__file__).parent.parent.parent

@@ -11,7 +11,17 @@ export interface RecommendationResponse {
   }>;
 }
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+export interface TaskResponse {
+  task_id: string;
+  status: 'pending' | 'processing' | 'completed' | 'failed' | 'not_found';
+  results?: RecommendationResponse;
+  error?: string;
+  created_at?: string;
+}
+
+// Use environment variable if set, otherwise use relative URL for Vite proxy in dev
+// In production (Docker), this should be set to the API service URL
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
 function convertPreferencesToRequest(preferences: BuildPreferences): {
   weights: Record<string, number>;
@@ -69,4 +79,91 @@ export async function submitInitialPreferences(
 
   const data: RecommendationResponse = await response.json();
   return data;
+}
+
+/**
+ * Submit initial build preferences to the server (async version).
+ * Returns a task_id that can be polled for results.
+ */
+export async function submitInitialPreferencesAsync(
+  preferences: BuildPreferences
+): Promise<string> {
+  const requestBody = convertPreferencesToRequest(preferences);
+
+  const response = await fetch(`${API_BASE_URL}/api/recommendations`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      ...requestBody,
+      limit: 10,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Failed to create task: ${response.status} ${response.statusText}. ${errorText}`
+    );
+  }
+
+  const data: { task_id: string; status: string; message?: string } = await response.json();
+  return data.task_id;
+}
+
+/**
+ * Poll for task results.
+ */
+export async function getTaskStatus(taskId: string): Promise<TaskResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/tasks/${taskId}`);
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Failed to get task status: ${response.status} ${response.statusText}. ${errorText}`
+    );
+  }
+
+  const data: TaskResponse = await response.json();
+  return data;
+}
+
+/**
+ * Submit preferences and poll for results until completed.
+ * Polls every 1-2 seconds until the task is completed or failed.
+ */
+export async function submitInitialPreferencesWithPolling(
+  preferences: BuildPreferences,
+  onProgress?: (status: TaskResponse) => void
+): Promise<RecommendationResponse> {
+  // Create task
+  const taskId = await submitInitialPreferencesAsync(preferences);
+
+  // Poll for results
+  const pollInterval = 1500; // 1.5 seconds
+  const maxAttempts = 120; // 2 minutes max
+  let attempts = 0;
+
+  while (attempts < maxAttempts) {
+    const status = await getTaskStatus(taskId);
+
+    if (onProgress) {
+      onProgress(status);
+    }
+
+    if (status.status === 'completed' && status.results) {
+      return status.results;
+    }
+
+    if (status.status === 'failed') {
+      throw new Error(status.error || 'Task failed');
+    }
+
+    // Wait before next poll
+    await new Promise((resolve) => setTimeout(resolve, pollInterval));
+    attempts++;
+  }
+
+  throw new Error('Task polling timeout');
 }

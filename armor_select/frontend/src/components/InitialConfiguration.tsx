@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { StatType, BuildPreferences, Recommendation } from '../types';
 import { StatMultiSelect } from './StatMultiSelect';
 import { StatNumberInput } from './StatNumberInput';
-import { submitInitialPreferences } from '../api/recommendations';
+import { submitInitialPreferencesWithPolling } from '../api/recommendations';
 
 interface InitialConfigurationProps {
   onPreferencesSubmitted: (recommendations: Recommendation[]) => void;
@@ -67,7 +67,15 @@ export function InitialConfiguration({
     };
 
     try {
-      const response = await submitInitialPreferences(preferences);
+      const response = await submitInitialPreferencesWithPolling(
+        preferences,
+        (status) => {
+          // Optional: show progress updates
+          if (status.status === 'processing') {
+            console.log('Processing recommendations...');
+          }
+        }
+      );
       onPreferencesSubmitted(response.recommendations);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to fetch recommendations';

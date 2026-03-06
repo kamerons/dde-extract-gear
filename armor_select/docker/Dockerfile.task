@@ -1,0 +1,13 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Copy requirements and install dependencies
+COPY requirements.txt /app/
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the armor_select package
+COPY armor_select/ /app/armor_select/
+
+# Run the task worker
+CMD ["python", "-m", "armor_select.task.worker"]

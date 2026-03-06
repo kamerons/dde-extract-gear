@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from typing import Dict, List
 
-from armor_select.backend.models import ArmorPiece
+from armor_select.shared.models import ArmorPiece
 
 
 class DataLoader:

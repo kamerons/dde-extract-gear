@@ -1,0 +1,165 @@
+"""Task service for managing recommendation tasks in Redis."""
+
+import json
+import uuid
+import logging
+from typing import Dict, Optional, Any
+from datetime import datetime, timedelta
+
+import redis
+from armor_select.api.config import Config
+
+logger = logging.getLogger(__name__)
+
+
+class TaskService:
+    """Service for managing tasks in Redis."""
+
+    TASK_EXPIRY_SECONDS = 3600  # 1 hour
+
+    def __init__(self):
+        """Initialize task service with Redis connection."""
+        self.config = Config()
+        self.redis_client = redis.Redis(
+            host=self.config.REDIS_HOST,
+            port=self.config.REDIS_PORT,
+            db=self.config.REDIS_DB,
+            password=self.config.REDIS_PASSWORD,
+            decode_responses=True
+        )
+
+    def create_task(
+        self,
+        weights: Dict[str, float],
+        constraints: Dict[str, int],
+        limit: int = 10
+    ) -> str:
+        """
+        Create a new recommendation task.
+
+        Args:
+            weights: Dictionary mapping stat names to weights
+            constraints: Dictionary mapping stat names to minimum values
+            limit: Maximum number of recommendations to return
+
+        Returns:
+            Task ID (UUID string)
+        """
+        task_id = str(uuid.uuid4())
+
+        # Store task metadata
+        task_meta = {
+            "task_id": task_id,
+            "weights": json.dumps(weights),
+            "constraints": json.dumps(constraints),
+            "limit": limit,
+            "status": "pending",
+            "created_at": datetime.utcnow().isoformat(),
+        }
+
+        # Store in Redis with expiry
+        meta_key = f"task:{task_id}:meta"
+        self.redis_client.hset(meta_key, mapping=task_meta)
+        self.redis_client.expire(meta_key, self.TASK_EXPIRY_SECONDS)
+
+        # Add task to queue
+        queue_key = "recommendation_tasks"
+        task_data = {
+            "task_id": task_id,
+            "weights": json.dumps(weights),
+            "constraints": json.dumps(constraints),
+            "limit": limit,
+        }
+        self.redis_client.rpush(queue_key, json.dumps(task_data))
+
+        logger.info(f"Created task {task_id}")
+        return task_id
+
+    def get_task_status(self, task_id: str) -> Dict[str, Any]:
+        """
+        Get task status and results.
+
+        Args:
+            task_id: Task ID
+
+        Returns:
+            Dictionary with task status, results (if completed), and error (if failed)
+        """
+        meta_key = f"task:{task_id}:meta"
+        result_key = f"task:{task_id}:result"
+
+        # Get task metadata
+        meta = self.redis_client.hgetall(meta_key)
+        if not meta:
+            return {
+                "task_id": task_id,
+                "status": "not_found",
+                "error": "Task not found"
+            }
+
+        status = meta.get("status", "unknown")
+        response = {
+            "task_id": task_id,
+            "status": status,
+            "created_at": meta.get("created_at"),
+        }
+
+        # If completed, get results
+        if status == "completed":
+            result_data = self.redis_client.get(result_key)
+            if result_data:
+                try:
+                    response["results"] = json.loads(result_data)
+                except json.JSONDecodeError:
+                    response["error"] = "Failed to parse results"
+                    response["status"] = "failed"
+        elif status == "failed":
+            error_data = self.redis_client.get(f"task:{task_id}:error")
+            if error_data:
+                response["error"] = error_data
+
+        return response
+
+    def update_task_status(
+        self,
+        task_id: str,
+        status: str,
+        results: Optional[Dict] = None,
+        error: Optional[str] = None
+    ) -> None:
+        """
+        Update task status (called by worker).
+
+        Args:
+            task_id: Task ID
+            status: New status (processing, completed, failed)
+            results: Results dictionary (if completed)
+            error: Error message (if failed)
+        """
+        meta_key = f"task:{task_id}:meta"
+        result_key = f"task:{task_id}:result"
+        error_key = f"task:{task_id}:error"
+
+        # Update metadata
+        updates = {
+            "status": status,
+            "updated_at": datetime.utcnow().isoformat(),
+        }
+        self.redis_client.hset(meta_key, mapping=updates)
+        self.redis_client.expire(meta_key, self.TASK_EXPIRY_SECONDS)
+
+        # Store results or error
+        if status == "completed" and results:
+            self.redis_client.setex(
+                result_key,
+                self.TASK_EXPIRY_SECONDS,
+                json.dumps(results)
+            )
+        elif status == "failed" and error:
+            self.redis_client.setex(
+                error_key,
+                self.TASK_EXPIRY_SECONDS,
+                error
+            )
+
+        logger.info(f"Updated task {task_id} to status {status}")

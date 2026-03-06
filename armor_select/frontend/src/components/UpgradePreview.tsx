@@ -34,7 +34,6 @@ export function UpgradePreview({ currentStats, upgradedStats }: UpgradePreviewPr
   for (const stat of allStats) {
     const currentValue = currentStats[stat] || 0;
     const upgradedValue = upgradedStats[stat] || 0;
-    const difference = upgradedValue - currentValue;
 
     if (currentValue === 0 && upgradedValue === 0) continue;
 
