@@ -1,10 +1,20 @@
 import { useState } from 'react';
-import type { StatType, BuildPreferences } from '../types';
+import type { StatType, BuildPreferences, Recommendation } from '../types';
 import { StatMultiSelect } from './StatMultiSelect';
 import { StatNumberInput } from './StatNumberInput';
 import { submitInitialPreferences } from '../api/recommendations';
 
-export function InitialConfiguration() {
+interface InitialConfigurationProps {
+  onPreferencesSubmitted: (recommendations: Recommendation[]) => void;
+  onLoadingChange?: (isLoading: boolean) => void;
+  onError?: (error: string | null) => void;
+}
+
+export function InitialConfiguration({
+  onPreferencesSubmitted,
+  onLoadingChange,
+  onError,
+}: InitialConfigurationProps) {
   const [maximizeStats, setMaximizeStats] = useState<StatType[]>([]);
   const [ignoreStats, setIgnoreStats] = useState<StatType[]>([]);
   const [minConstraints, setMinConstraints] = useState<Record<StatType, number>>(
@@ -14,7 +24,6 @@ export function InitialConfiguration() {
     {} as Record<StatType, number>
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [hasSubmitted, setHasSubmitted] = useState(false);
 
   // Validation: can't maximize and ignore the same stat
   const getDisabledStatsForMaximize = (): StatType[] => {
@@ -47,6 +56,8 @@ export function InitialConfiguration() {
 
   const handleSubmit = async () => {
     setIsSubmitting(true);
+    onLoadingChange?.(true);
+    onError?.(null);
 
     const preferences: BuildPreferences = {
       maximizeStats,
@@ -56,29 +67,17 @@ export function InitialConfiguration() {
     };
 
     try {
-      await submitInitialPreferences(preferences);
-      setHasSubmitted(true);
-      // Navigate to results page (placeholder for now)
-      // In a real implementation, this would use React Router or similar
-      console.log('Preferences submitted, navigating to results...');
+      const response = await submitInitialPreferences(preferences);
+      onPreferencesSubmitted(response.recommendations);
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to fetch recommendations';
       console.error('Error submitting preferences:', error);
+      onError?.(errorMessage);
     } finally {
       setIsSubmitting(false);
+      onLoadingChange?.(false);
     }
   };
-
-  if (hasSubmitted) {
-    return (
-      <div className="configuration-container">
-        <div className="success-message">
-          <h2>Preferences Submitted!</h2>
-          <p>Loading recommendations...</p>
-          <p className="note">(Results page will be implemented next)</p>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="configuration-container">

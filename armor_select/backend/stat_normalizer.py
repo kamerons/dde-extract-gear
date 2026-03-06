@@ -1,5 +1,7 @@
 """Stat normalization to 0-1 scale."""
 
+from functools import lru_cache
+
 
 class StatNormalizer:
     """
@@ -51,6 +53,7 @@ class StatNormalizer:
         'hero_speed': SPEED_RANGE,
     }
 
+    @lru_cache(maxsize=100000)
     def normalize_stat(self, stat_name: str, value: int) -> float:
         """
         Normalize a stat value to 0-1 scale using grouped ranges.

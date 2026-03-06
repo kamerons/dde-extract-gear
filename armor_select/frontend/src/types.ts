@@ -25,3 +25,23 @@ export interface BuildPreferences {
   minConstraints: Record<StatType, number>;
   softCaps: Record<StatType, number>;
 }
+
+export interface RecommendationPiece {
+  armor_set: string;
+  armor_type: string;
+  current_level: number;
+  max_level: number;
+  stats: Record<string, number>;
+}
+
+export interface Recommendation {
+  set_id: string;
+  pieces: RecommendationPiece[];
+  current_stats: Record<string, number>;
+  upgraded_stats: Record<string, number>;
+  effective_stats: Record<string, number>;
+  wasted_points: Record<string, number>;
+  score: number;
+  potential_score: number;
+  flexibility_score: number;
+}

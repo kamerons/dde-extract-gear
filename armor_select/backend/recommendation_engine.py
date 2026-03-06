@@ -1,10 +1,22 @@
 """Main recommendation engine for armor set optimization."""
 
-from typing import Dict, List
-from itertools import combinations
+import logging
+import math
+import time
+import heapq
+from functools import lru_cache
+from typing import Dict, List, Tuple
+from itertools import product
 
 from armor_select.backend.constraint_manager import ConstraintManager
 from armor_select.backend.stat_normalizer import StatNormalizer
+
+logger = logging.getLogger(__name__)
+
+
+class TooManyCombinationsError(Exception):
+    """Raised when the number of combinations to evaluate exceeds the limit."""
+    pass
 
 
 class RecommendationEngine:
@@ -76,6 +88,314 @@ class RecommendationEngine:
 
         return score
 
+    @lru_cache(maxsize=10000)
+    def _get_cached_piece_stats(self, stat_values_tuple: Tuple[int, ...]) -> Dict[str, int]:
+        """
+        Cached version of stat extraction that works with stat values tuple.
+
+        Args:
+            stat_values_tuple: Tuple of stat values in STAT_TYPES order
+
+        Returns:
+            Dictionary of stat values
+        """
+        return dict(zip(self.STAT_TYPES, stat_values_tuple))
+
+    def get_piece_stats(self, piece: Dict) -> Dict[str, int]:
+        """
+        Extract stat values from a piece as a dictionary.
+
+        Args:
+            piece: Armor piece dictionary
+
+        Returns:
+            Dictionary of stat values (defaults to 0 for missing stats)
+        """
+        # Extract stat values as tuple for caching
+        stat_values = tuple(
+            int(piece.get(stat, 0)) if isinstance(piece.get(stat, 0), (int, float)) else 0
+            for stat in self.STAT_TYPES
+        )
+        return self._get_cached_piece_stats(stat_values)
+
+    def is_dominated(self, piece_a: Dict, piece_b: Dict) -> bool:
+        """
+        Check if piece_a is strictly dominated by piece_b.
+
+        Piece A is dominated by Piece B if:
+        - For all stats, B >= A (B is not worse in any stat)
+        - For at least one stat, B > A (B is strictly better in at least one stat)
+
+        Args:
+            piece_a: First armor piece to compare
+            piece_b: Second armor piece to compare
+
+        Returns:
+            True if piece_a is dominated by piece_b, False otherwise
+        """
+        stats_a = self.get_piece_stats(piece_a)
+        stats_b = self.get_piece_stats(piece_b)
+
+        all_better_or_equal = True
+        at_least_one_better = False
+
+        for stat in self.STAT_TYPES:
+            val_a = stats_a.get(stat, 0)
+            val_b = stats_b.get(stat, 0)
+
+            if val_b < val_a:
+                # B is worse in this stat, so B doesn't dominate A
+                all_better_or_equal = False
+                break
+            elif val_b > val_a:
+                # B is strictly better in this stat
+                at_least_one_better = True
+
+        return all_better_or_equal and at_least_one_better
+
+    def filter_dominated_pieces(self, pieces: List[Dict]) -> List[Dict]:
+        """
+        Filter out pieces that are strictly dominated by other pieces.
+
+        For a group of pieces of the same armor_set and armor_type,
+        remove any piece that is strictly worse than another piece in all stats.
+
+        Args:
+            pieces: List of armor pieces (should be same armor_set and armor_type)
+
+        Returns:
+            Filtered list with dominated pieces removed
+        """
+        if len(pieces) <= 1:
+            return pieces
+
+        # Track which pieces are dominated
+        dominated_indices = set()
+
+        # Compare all pairs of pieces
+        for i in range(len(pieces)):
+            if i in dominated_indices:
+                continue
+            for j in range(i + 1, len(pieces)):
+                if j in dominated_indices:
+                    continue
+
+                # Check if piece_i is dominated by piece_j
+                if self.is_dominated(pieces[i], pieces[j]):
+                    dominated_indices.add(i)
+                    break
+                # Check if piece_j is dominated by piece_i
+                elif self.is_dominated(pieces[j], pieces[i]):
+                    dominated_indices.add(j)
+
+        # Return only non-dominated pieces
+        filtered = [pieces[i] for i in range(len(pieces)) if i not in dominated_indices]
+        return filtered
+
+    def can_set_satisfy_constraints(
+        self,
+        pieces_by_armor_type: Dict[str, List[Dict]],
+        constraints: Dict[str, int]
+    ) -> bool:
+        """
+        Check if a set can possibly satisfy all constraints.
+
+        Calculates the maximum possible stats by taking the best piece for each
+        stat across all armor types. If the maximum possible stats cannot satisfy
+        all constraints, no combination from this set can.
+
+        Args:
+            pieces_by_armor_type: Dictionary mapping armor types to lists of pieces
+            constraints: Dictionary mapping stat names to minimum required values
+
+        Returns:
+            True if the set can possibly satisfy all constraints, False otherwise
+        """
+        if not constraints:
+            return True
+
+        # Calculate maximum possible stats by taking best piece for each stat
+        max_possible_stats = {stat: 0 for stat in self.STAT_TYPES}
+
+        for armor_type, pieces in pieces_by_armor_type.items():
+            for stat in self.STAT_TYPES:
+                max_for_type = max((p.get(stat, 0) for p in pieces), default=0)
+                max_possible_stats[stat] += max_for_type
+
+        # Check if max possible stats can satisfy all constraints
+        for stat, min_val in constraints.items():
+            if max_possible_stats.get(stat, 0) < min_val:
+                return False
+
+        return True
+
+    def can_satisfy_constraints_from_here(
+        self,
+        current_stats: Dict[str, int],
+        remaining_armor_types: List[str],
+        pieces_by_armor_type: Dict[str, List[Dict]],
+        constraints: Dict[str, int]
+    ) -> bool:
+        """
+        Check if constraints can still be satisfied from a partial combination.
+
+        Calculates the maximum possible stats from remaining armor types and checks
+        if current stats plus max remaining can satisfy all constraints.
+
+        Args:
+            current_stats: Stats from pieces already selected
+            remaining_armor_types: List of armor types not yet selected
+            pieces_by_armor_type: Dictionary mapping armor types to lists of pieces
+            constraints: Dictionary mapping stat names to minimum required values
+
+        Returns:
+            True if constraints can still be satisfied, False otherwise
+        """
+        if not constraints:
+            return True
+
+        # Calculate max possible stats from remaining pieces
+        max_remaining = {stat: 0 for stat in self.STAT_TYPES}
+
+        for armor_type in remaining_armor_types:
+            pieces = pieces_by_armor_type.get(armor_type, [])
+            for stat in self.STAT_TYPES:
+                max_for_type = max((p.get(stat, 0) for p in pieces), default=0)
+                max_remaining[stat] += max_for_type
+
+        # Check if current + max remaining can satisfy constraints
+        for stat, min_val in constraints.items():
+            total_possible = current_stats.get(stat, 0) + max_remaining.get(stat, 0)
+            if total_possible < min_val:
+                return False
+
+        return True
+
+    def sort_pieces_by_quality(
+        self,
+        pieces_by_armor_type: Dict[str, List[Dict]],
+        weights: Dict[str, float]
+    ) -> Dict[str, List[Dict]]:
+        """
+        Sort pieces by individual weighted score contribution for each armor type.
+
+        This enables ordered exploration where best combinations are evaluated first.
+
+        Args:
+            pieces_by_armor_type: Dictionary mapping armor types to lists of pieces
+            weights: Dictionary mapping stat names to weights
+
+        Returns:
+            Dictionary with pieces sorted by quality (best first) for each armor type
+        """
+        sorted_pieces = {}
+
+        for armor_type, pieces in pieces_by_armor_type.items():
+            # Score each piece individually
+            scored = []
+            for piece in pieces:
+                stats = self.get_piece_stats(piece)
+                score = self.calculate_score(stats, weights)
+                scored.append((score, piece))
+
+            # Sort by score (best first)
+            scored.sort(reverse=True, key=lambda x: x[0])
+            sorted_pieces[armor_type] = [p for _, p in scored]
+
+        return sorted_pieces
+
+    def depth_first_recommendations(
+        self,
+        pieces_by_armor_type: Dict[str, List[Dict]],
+        weights: Dict[str, float],
+        constraints: Dict[str, int],
+        limit: int = 10,
+        timeout_seconds: float = 10.0
+    ) -> List[Tuple[float, List[Dict], Dict[str, int]]]:
+        """
+        Evaluate combinations depth-first with timeout and priority queue.
+
+        Uses ordered exploration (sorted pieces) to evaluate best combinations first.
+        Maintains a priority queue of top N results and stops early on timeout.
+
+        Args:
+            pieces_by_armor_type: Dictionary mapping armor types to lists of pieces
+            weights: Dictionary mapping stat names to weights
+            constraints: Dictionary mapping stat names to minimum values
+            limit: Maximum number of results to return
+            timeout_seconds: Maximum time to spend evaluating (default: 10.0)
+
+        Returns:
+            List of tuples (score, pieces_list, stats_dict) sorted by score (best first)
+        """
+        # Sort pieces by quality for ordered exploration
+        sorted_pieces = self.sort_pieces_by_quality(pieces_by_armor_type, weights)
+
+        # Calculate total planned combinations
+        total_planned = 1
+        for armor_type in sorted_pieces.keys():
+            total_planned *= len(sorted_pieces[armor_type])
+
+        logger.info(f"Total combinations to evaluate: {total_planned}")
+
+        # Initialize priority queue (min-heap) for top N results
+        # Store as (score, counter, pieces, stats) where lower score = lower priority
+        # We want to keep the highest scores, so we use a min-heap and compare scores
+        heap = []
+        start_time = time.time()
+        evaluated = 0
+        last_log_time = start_time
+        last_log_count = 0
+        counter = 0  # Tie-breaker for heap comparison
+
+        # Iterate through combinations using sorted pieces
+        armor_types = list(sorted_pieces.keys())
+        for combo in product(*[sorted_pieces[at] for at in armor_types]):
+            # Check timeout
+            elapsed = time.time() - start_time
+            if elapsed >= timeout_seconds:
+                remaining = total_planned - evaluated
+                logger.info(
+                    f"Timeout reached after {elapsed:.2f}s. "
+                    f"Evaluated {evaluated}/{total_planned} combinations. "
+                    f"Remaining: {remaining}. Returning best results found so far."
+                )
+                break
+
+            evaluated += 1
+
+            # Log progress periodically (every 10000 evaluations or every 10 seconds)
+            current_time = time.time()
+            if (evaluated - last_log_count >= 10000) or (current_time - last_log_time >= 10.0):
+                logger.info(f"Evaluated {evaluated}/{total_planned} combinations")
+                last_log_time = current_time
+                last_log_count = evaluated
+
+            # Aggregate stats
+            combo_list = list(combo)
+            stats = self.aggregate_stats(combo_list)
+
+            # Check hard constraints
+            violations = self.constraint_manager.violates_hard_constraints(stats)
+            if violations:
+                continue  # Skip sets that violate constraints
+
+            # Calculate score
+            score = self.calculate_score(stats, weights)
+
+            # Maintain heap of size limit
+            # Use counter as tie-breaker to ensure tuple comparison works
+            counter += 1
+            if len(heap) < limit:
+                heapq.heappush(heap, (score, counter, combo_list, stats))
+            elif score > heap[0][0]:
+                heapq.heapreplace(heap, (score, counter, combo_list, stats))
+
+        # Return top results sorted by score (best first)
+        results = [(score, pieces, stats) for score, _, pieces, stats in heap]
+        results.sort(reverse=True, key=lambda x: x[0])
+        return results
+
     def generate_set_id(self, pieces: List[Dict], index: int) -> str:
         """
         Generate unique ID for a complete set.
@@ -121,70 +441,110 @@ class RecommendationEngine:
                     sets_by_type[set_type] = []
                 sets_by_type[set_type].append(piece)
 
-        # Generate complete sets (4 pieces from same set)
-        complete_sets = []
+        # Filter out dominated pieces to reduce combination count
+        # For each (armor_set, armor_type) group, remove pieces that are strictly worse
+        original_piece_count = sum(len(pieces) for pieces in sets_by_type.values())
+        filtered_piece_count = 0
+
         for set_type, pieces in sets_by_type.items():
-            if len(pieces) >= 4:
-                # Generate all combinations of 4 pieces
-                for combo in combinations(pieces, 4):
-                    complete_sets.append(list(combo))
+            # Group pieces by armor_type within this set
+            pieces_by_armor_type: Dict[str, List[Dict]] = {}
+            for piece in pieces:
+                armor_type = piece.get('armor_type')
+                if armor_type:
+                    if armor_type not in pieces_by_armor_type:
+                        pieces_by_armor_type[armor_type] = []
+                    pieces_by_armor_type[armor_type].append(piece)
 
-        if not complete_sets:
-            return []
+            # Filter dominated pieces for each armor type
+            filtered_by_armor_type: Dict[str, List[Dict]] = {}
+            for armor_type, armor_pieces in pieces_by_armor_type.items():
+                filtered_pieces = self.filter_dominated_pieces(armor_pieces)
+                filtered_by_armor_type[armor_type] = filtered_pieces
+                filtered_piece_count += len(filtered_pieces)
 
-        # Score all sets
-        scored_sets = []
-        for idx, armor_set in enumerate(complete_sets):
-            # Aggregate stats
-            aggregated_stats = self.aggregate_stats(armor_set)
+            # Update sets_by_type with filtered pieces
+            sets_by_type[set_type] = []
+            for armor_type, filtered_pieces in filtered_by_armor_type.items():
+                sets_by_type[set_type].extend(filtered_pieces)
 
-            # Check hard constraints
-            violations = self.constraint_manager.violates_hard_constraints(
-                aggregated_stats
+        removed_count = original_piece_count - filtered_piece_count
+        if removed_count > 0:
+            logger.info(
+                f"Filtered out {removed_count} dominated pieces "
+                f"({original_piece_count} -> {filtered_piece_count})"
             )
-            if violations:
-                continue  # Skip sets that violate constraints
 
-            # Calculate score
-            score = self.calculate_score(aggregated_stats, weights)
+        # Process each set with optimizations
+        all_scored_sets = []
 
-            # Generate set ID
-            set_id = self.generate_set_id(armor_set, idx)
+        for set_type, pieces in sets_by_type.items():
+            # Group pieces by armor_type within this set (re-group after filtering)
+            pieces_by_armor_type: Dict[str, List[Dict]] = {}
+            for piece in pieces:
+                armor_type = piece.get('armor_type')
+                if armor_type:
+                    if armor_type not in pieces_by_armor_type:
+                        pieces_by_armor_type[armor_type] = []
+                    pieces_by_armor_type[armor_type].append(piece)
 
-            # Format pieces for response
-            formatted_pieces = []
-            for piece in armor_set:
-                # Extract stats from piece
-                piece_stats = {
-                    stat: piece.get(stat, 0)
-                    for stat in self.STAT_TYPES
-                    if isinstance(piece.get(stat, 0), (int, float))
-                }
-                formatted_pieces.append({
-                    'armor_set': piece.get('armor_set', ''),
-                    'armor_type': piece.get('armor_type', ''),
-                    'current_level': piece.get('current_level', 1),
-                    'max_level': piece.get('max_level', 16),
-                    'stats': piece_stats
+            # Need all 7 armor types to form a complete set
+            if len(pieces_by_armor_type) != 7:
+                continue
+
+            # Apply constraint-based pruning (Strategy 1)
+            if not self.can_set_satisfy_constraints(pieces_by_armor_type, constraints):
+                logger.info(
+                    f"Skipping set '{set_type}': cannot satisfy constraints even with best pieces"
+                )
+                continue
+
+            # Use depth-first search with ordered exploration and timeout
+            results = self.depth_first_recommendations(
+                pieces_by_armor_type,
+                weights,
+                constraints,
+                limit=limit,
+                timeout_seconds=10.0
+            )
+
+            # Format results for this set
+            for idx, (score, armor_set, aggregated_stats) in enumerate(results):
+                # Generate set ID
+                set_id = self.generate_set_id(armor_set, idx)
+
+                # Format pieces for response
+                formatted_pieces = []
+                for piece in armor_set:
+                    # Extract stats from piece
+                    piece_stats = {
+                        stat: piece.get(stat, 0)
+                        for stat in self.STAT_TYPES
+                        if isinstance(piece.get(stat, 0), (int, float))
+                    }
+                    formatted_pieces.append({
+                        'armor_set': piece.get('armor_set', ''),
+                        'armor_type': piece.get('armor_type', ''),
+                        'current_level': piece.get('current_level', 1),
+                        'max_level': piece.get('max_level', 16),
+                        'stats': piece_stats
+                    })
+
+                # For Phase 1, use same stats for all stat fields
+                # (upgraded_stats, effective_stats, wasted_points will be
+                # implemented in Phase 2/3)
+                all_scored_sets.append({
+                    'set_id': set_id,
+                    'pieces': formatted_pieces,
+                    'current_stats': aggregated_stats,
+                    'upgraded_stats': aggregated_stats.copy(),  # Placeholder
+                    'effective_stats': aggregated_stats.copy(),  # Placeholder
+                    'wasted_points': {stat: 0 for stat in self.STAT_TYPES},  # Placeholder
+                    'score': score,
+                    'potential_score': 0.0,  # Placeholder for Phase 3
+                    'flexibility_score': 0.0,  # Placeholder for Phase 3
                 })
 
-            # For Phase 1, use same stats for all stat fields
-            # (upgraded_stats, effective_stats, wasted_points will be
-            # implemented in Phase 2/3)
-            scored_sets.append({
-                'set_id': set_id,
-                'pieces': formatted_pieces,
-                'current_stats': aggregated_stats,
-                'upgraded_stats': aggregated_stats.copy(),  # Placeholder
-                'effective_stats': aggregated_stats.copy(),  # Placeholder
-                'wasted_points': {stat: 0 for stat in self.STAT_TYPES},  # Placeholder
-                'score': score,
-                'potential_score': 0.0,  # Placeholder for Phase 3
-                'flexibility_score': 0.0,  # Placeholder for Phase 3
-            })
-
-        # Sort by score (descending)
-        scored_sets.sort(key=lambda x: x['score'], reverse=True)
-
-        # Return top N
-        return scored_sets[:limit]
+        # Sort by score (descending) and return top N
+        all_scored_sets.sort(key=lambda x: x['score'], reverse=True)
+        return all_scored_sets[:limit]

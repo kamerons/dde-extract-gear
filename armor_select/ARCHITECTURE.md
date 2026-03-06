@@ -7,7 +7,7 @@ The Armor Selection System is a React + Python server application that helps use
 ## Core Requirements
 
 ### Key Constraints
-- **Complete Sets Only**: Armor must form a complete set (4 pieces from the same `armor_set`) to be considered, as set bonuses are significant. Note: There are 7 armor types available, but only 4 are needed for a complete set.
+- **Complete Sets Only**: Armor must form a complete set (7 pieces from the same `armor_set`, one of each armor type) to be considered, as set bonuses are significant. A complete set requires one piece of each of the 7 armor types, all from the same set (e.g., all from "Leather Armor Set" or all from "Knight Set").
 - **No Neural Networks**: Preference learning must be lightweight and instant (no training time)
 - **No LLM Integration**: All feedback is structured (buttons, no text input)
 - **Reactive Constraint Discovery**: Users discover constraints as they see recommendations, not upfront
@@ -89,12 +89,12 @@ armor_piece = {
 ```python
 complete_set = {
     'id': 'chain_set_001',
-    'pieces': [piece1, piece2, piece3, piece4],  # 4 pieces from same set
+    'pieces': [piece1, piece2, piece3, piece4, piece5, piece6, piece7],  # 7 pieces from same set, one of each armor type
     'set_type': 'Chain Armor Set',
-    'aggregated_stats': {                        # Sum of all 4 pieces
-        'defense': 1800,
-        'attack': 1280,
-        'hero_speed': 60,
+    'aggregated_stats': {                        # Sum of all 7 pieces
+        'defense': 3150,
+        'attack': 2240,
+        'hero_speed': 105,
         # ...
     }
 }
@@ -254,7 +254,7 @@ class UpgradeCalculator:
         return upgraded
 
     def calculate_set_upgraded_stats(self, armor_set):
-        """Calculate upgraded stats for all 4 pieces in a set"""
+        """Calculate upgraded stats for all 7 pieces in a set"""
         return [
             self.calculate_upgraded_stats(piece)
             for piece in armor_set
@@ -345,7 +345,7 @@ Evaluates changes to an existing armor set, considering partial replacements.
 class IncrementalChangeEvaluator:
     def evaluate_changes(self, current_set, new_inventory, weights):
         """
-        current_set: list of 4 currently equipped pieces
+        current_set: list of 7 currently equipped pieces
         new_inventory: list of new armor pieces to consider
         weights: current preference weights
 
@@ -371,7 +371,10 @@ class IncrementalChangeEvaluator:
         )
         recommendations.extend(triple_replacements)
 
-        # Option 4: Replace all 4 (complete new set)
+        # Option 4-N: Replace more pieces (up to all 7)
+        # ... additional replacement options ...
+
+        # Option N: Replace all 7 (complete new set)
         complete_replacements = self._evaluate_complete_replacements(
             current_set, new_inventory, weights
         )
@@ -407,7 +410,9 @@ class EnhancedRecommendationEngine:
         # Generate complete sets
         complete_sets = []
         for set_type, pieces in sets_by_type.items():
-            if len(pieces) >= 4:  # Need at least 4 pieces for complete set
+            # Need all 7 armor types from the same set for a complete set
+            pieces_by_type = self._group_by_armor_type(pieces)
+            if len(pieces_by_type) == 7:  # Need all 7 armor types
                 complete_sets.extend(self._generate_complete_sets(pieces))
 
         # Score all sets
@@ -641,7 +646,7 @@ interface Feedback {
 ### RecommendationCard Component
 
 Displays a recommended armor set with:
-- All 4 pieces listed
+- All 7 pieces listed (one of each armor type)
 - Current stats vs upgraded stats
 - Wasted points highlighted (over soft caps)
 - Potential improvement score
@@ -673,11 +678,12 @@ Shows stats with upgrades applied:
 6. New recommendations appear
 
 ### Workflow B: Incremental Change
-1. User has 4 pieces equipped
+1. User has 7 pieces equipped (one of each armor type)
 2. New batch of armor imported
 3. System evaluates:
    - Single piece replacements
    - Double piece replacements
+   - Multiple piece replacements
    - Complete set replacements
 4. Shows: "Replace shoulder_pad: +50 score improvement"
 5. Shows upgraded stats for both old and new
@@ -751,7 +757,7 @@ From `extract_gear/index.py`:
 From `extract_gear/constants.py` (7 types total):
 - `shoulder_pad`, `mask`, `hat`, `greaves`, `shield`, `bracer`, `belt`
 
-Note: A complete armor set requires 4 pieces from the same set, but there are 7 possible armor types. Any combination of 4 different armor types from the same set forms a complete set.
+Note: A complete armor set requires all 7 armor types from the same set. Each complete set must have exactly one piece of each armor type (shoulder_pad, mask, hat, greaves, shield, bracer, belt), and all pieces must belong to the same set (e.g., all from "Leather Armor Set" or all from "Knight Set").
 
 ### Set Types
 From `extract_gear/constants.py` (8 types total):

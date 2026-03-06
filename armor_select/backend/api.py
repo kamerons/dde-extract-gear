@@ -1,5 +1,6 @@
 """FastAPI application for armor selection API."""
 
+import logging
 from contextlib import asynccontextmanager
 from typing import Dict
 
@@ -13,8 +14,14 @@ from armor_select.backend.models import (
     Recommendation,
     RecommendationPiece
 )
-from armor_select.backend.recommendation_engine import RecommendationEngine
+from armor_select.backend.recommendation_engine import RecommendationEngine, TooManyCombinationsError
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 # Global state for loaded data
 inventory: list[Dict] = []
@@ -104,6 +111,9 @@ async def get_recommendations(
     weights = {}
     constraints = {}
 
+    # Log request
+    logger.info(f"New GET request received: limit={limit}")
+
     # Get recommendations
     try:
         recommendations_data = recommendation_engine.get_recommendations(
@@ -111,6 +121,11 @@ async def get_recommendations(
             constraints=constraints,
             limit=limit
         )
+    except TooManyCombinationsError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=str(e)
+        ) from e
     except Exception as e:
         raise HTTPException(
             status_code=500,
@@ -167,6 +182,9 @@ async def post_recommendations(request: RecommendationRequest):
     constraints = request.constraints.min if request.constraints else {}
     limit = request.limit or 10
 
+    # Log request
+    logger.info(f"New POST request received: weights={weights}, constraints={constraints}, limit={limit}")
+
     # Get recommendations
     try:
         recommendations_data = recommendation_engine.get_recommendations(
@@ -174,6 +192,11 @@ async def post_recommendations(request: RecommendationRequest):
             constraints=constraints,
             limit=limit
         )
+    except TooManyCombinationsError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=str(e)
+        ) from e
     except Exception as e:
         raise HTTPException(
             status_code=500,
