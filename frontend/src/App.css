@@ -2,6 +2,7 @@
 .configuration-container {
   max-width: 1200px;
   margin: 0 auto;
+  min-width: 0;
   padding: 2rem;
   min-height: 100vh;
 }
@@ -249,6 +250,10 @@
   font-weight: 500;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
   z-index: 1000;
+}
+
+.save-toast-error {
+  background: #8b2020;
 }
 
 .results-header {
@@ -750,6 +755,23 @@
 
 .app-tab-panel {
   flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* When Training tab is active: panel fills height and does not scroll; training content scrolls in each pane */
+.app-tab-panel--training {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.app-tab-panel--training > * {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 /* Extract configuration tab */
@@ -801,6 +823,41 @@
   border: 1px solid #e0e0e0;
   border-radius: 4px;
   font-size: 1rem;
+}
+
+/* Two-column layout: stacked form left, image right */
+.extract-config-origin-layout {
+  display: flex;
+  flex-direction: row;
+  gap: 1rem;
+  align-items: flex-start;
+  flex-wrap: nowrap;
+}
+
+.extract-config-origin-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.extract-config-origin-form .stat-section-label {
+  margin-bottom: 0.25rem;
+}
+
+.extract-config-origin-form .extract-config-form-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #333;
+}
+
+.extract-config-origin-layout .extract-config-image-wrapper {
+  margin-top: 0;
+  min-width: 0;
+  flex: 1;
 }
 
 .extract-config-image-wrapper {
@@ -963,4 +1020,197 @@
   font-size: 0.9rem;
   white-space: pre;
   overflow-x: auto;
+}
+
+/* Sub-tabs: Configuration | Training */
+.extract-config-sub-tabs {
+  display: flex;
+  gap: 0.25rem;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.extract-config-sub-tab {
+  padding: 0.5rem 1rem;
+  font-size: 1rem;
+  font-weight: 500;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  background: none;
+  color: #666;
+  cursor: pointer;
+}
+
+.extract-config-sub-tab:hover {
+  color: #333;
+}
+
+.extract-config-sub-tab-active {
+  color: #333;
+  border-bottom-color: #06c;
+}
+
+/* Training page: full width, left-aligned, fills height so left/right panes scroll separately */
+.extract-config--training-page {
+  max-width: none;
+  margin: 0;
+  width: 100%;
+  padding: 0.75rem 2rem 2rem;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.extract-config--training-header {
+  text-align: left;
+  margin-bottom: 0.5rem;
+  flex-shrink: 0;
+}
+
+.extract-config--training-header h1 {
+  margin-bottom: 0;
+}
+
+.extract-config--training-header .header-description {
+  margin: 0;
+}
+
+/* Model tabs with divider below */
+.extract-config-model-tabs.extract-config-model-tabs-top {
+  flex-shrink: 0;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+/* Training 2-pane layout: fills remaining height so each column scrolls independently */
+.extract-config-training-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1300px) minmax(280px, 420px);
+  grid-template-rows: minmax(0, 1fr);
+  gap: 1.5rem;
+  align-items: stretch;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  width: 100%;
+}
+
+@media (max-width: 900px) {
+  .extract-config-training-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.extract-config-training-left {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+.extract-config-training-right {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* Model sub-tabs (Digit / Type / Box detector) */
+.extract-config-model-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.extract-config-model-tab {
+  padding: 0.4rem 0.75rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  background: #f9f9f9;
+  color: #666;
+  cursor: pointer;
+}
+
+.extract-config-model-tab:hover {
+  background: #f0f0f0;
+  color: #333;
+}
+
+.extract-config-model-tab-active {
+  background: #e8f0fe;
+  border-color: #06c;
+  color: #06c;
+}
+
+.extract-config-coming-soon {
+  color: #666;
+  font-style: italic;
+  padding: 1rem 0;
+}
+
+/* Training preview (test set with boxes) */
+.extract-config-training-preview {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid #e0e0e0;
+}
+
+.extract-config-preview-loading,
+.extract-config-preview-empty {
+  color: #666;
+  margin: 0.5rem 0;
+}
+
+.extract-config-preview-nav {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.extract-config-preview-btn {
+  padding: 0.4rem 0.75rem;
+  font-size: 0.9rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  background: #f5f5f5;
+  cursor: pointer;
+}
+
+.extract-config-preview-btn:hover {
+  background: #e8e8e8;
+}
+
+.extract-config-preview-index {
+  font-size: 0.9rem;
+  color: #666;
+}
+
+/* Preview wrap: exact size so image and overlay stay in sync; sidebar scrolls if needed */
+.extract-config-preview-image-wrap {
+  position: relative;
+  display: block;
+  flex-shrink: 0;
+}
+
+.extract-config-preview-image {
+  display: block;
+  vertical-align: top;
+}
+
+.extract-config-preview-overlay {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
 }

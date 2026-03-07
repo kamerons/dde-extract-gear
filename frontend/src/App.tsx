@@ -2,11 +2,12 @@ import { useState } from 'react';
 import { InitialConfiguration } from './components/InitialConfiguration';
 import { ResultsScreen } from './components/ResultsScreen';
 import { ExtractConfig } from './components/ExtractConfig';
+import { ExtractTraining } from './components/ExtractTraining';
 import type { BuildPreferences } from './types';
 import './App.css';
 
 type View = 'configuration' | 'results';
-type Tab = 'recommendations' | 'configuration';
+type Tab = 'recommendations' | 'training' | 'configuration';
 
 function App() {
   const [currentView, setCurrentView] = useState<View>('configuration');
@@ -47,6 +48,14 @@ function App() {
         </button>
         <button
           type="button"
+          className={`app-tab ${activeTab === 'training' ? 'app-tab-active' : ''}`}
+          onClick={() => setActiveTab('training')}
+          aria-current={activeTab === 'training' ? 'page' : undefined}
+        >
+          Training
+        </button>
+        <button
+          type="button"
           className={`app-tab ${activeTab === 'configuration' ? 'app-tab-active' : ''}`}
           onClick={() => setActiveTab('configuration')}
           aria-current={activeTab === 'configuration' ? 'page' : undefined}
@@ -54,7 +63,9 @@ function App() {
           Configuration
         </button>
       </nav>
-      <main className="app-tab-panel">
+      <main
+        className={`app-tab-panel${activeTab === 'training' ? ' app-tab-panel--training' : ''}`}
+      >
         {activeTab === 'recommendations' && (
           <InitialConfiguration
             onNavigateToResults={handleNavigateToResults}
@@ -62,6 +73,7 @@ function App() {
             error={configError}
           />
         )}
+        {activeTab === 'training' && <ExtractTraining />}
         {activeTab === 'configuration' && <ExtractConfig />}
       </main>
     </div>

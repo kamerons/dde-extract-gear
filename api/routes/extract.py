@@ -275,3 +275,89 @@ async def training_evaluate():
     model = keras.models.load_model(str(load_path))
     metrics = _compute_test_metrics(model, X_test, y_test)
     return metrics
+
+
+@router.get("/api/extract/training/preview")
+async def training_preview():
+    """
+    Return test set items with ground-truth and predicted origins for box detector.
+    Frontend can draw boxes for both and show next/previous. 404 if no model.
+    """
+    from task.processors.box_detector_processor import (
+        INPUT_HEIGHT,
+        INPUT_WIDTH,
+        _build_arrays,
+        _labeled_dirs,
+        _load_image,
+        _scan_sources,
+        _split_train_test,
+    )
+
+    model_path = _repo_root() / config.BOX_DETECTOR_MODEL_PATH
+    load_path = (
+        model_path
+        if model_path.exists()
+        else Path(str(model_path) + ".keras")
+    )
+    if not load_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="Box detector model not found. Run training first.",
+        )
+
+    data_dir = _data_dir()
+    labeled = _labeled_dirs(data_dir)
+    if not labeled:
+        raise HTTPException(
+            status_code=400,
+            detail="No labeled screenshots found.",
+        )
+    sources = _scan_sources(labeled)
+    if not sources:
+        raise HTTPException(
+            status_code=400,
+            detail="No valid (image, .txt) pairs found.",
+        )
+    _, test_sources = _split_train_test(sources, config.BOX_DETECTOR_TEST_RATIO)
+    if not test_sources:
+        raise HTTPException(
+            status_code=400,
+            detail="No test set after split.",
+        )
+
+    X_test, _ = _build_arrays(
+        test_sources,
+        augment=False,
+        shift_regular=config.EXTRACT_AUGMENT_SHIFT_REGULAR,
+        shift_blueprint=config.EXTRACT_AUGMENT_SHIFT_BLUEPRINT,
+        fill_mode=config.EXTRACT_AUGMENT_FILL,
+        augment_count=config.EXTRACT_AUGMENT_COUNT,
+    )
+
+    from tensorflow import keras
+    model = keras.models.load_model(str(load_path))
+    pred = model.predict(X_test, verbose=0)
+
+    items = []
+    for i, (typename, filename, png_path, ox, oy) in enumerate(test_sources):
+        img = _load_image(png_path)
+        w, h = img.size
+        scale_x = INPUT_WIDTH / w
+        scale_y = INPUT_HEIGHT / h
+        pred_x = int(round(float(pred[i, 0]) / scale_x))
+        pred_y = int(round(float(pred[i, 1]) / scale_y))
+        subdir = f"labeled/screenshots/{typename}"
+        items.append({
+            "filename": filename,
+            "subdir": subdir,
+            "origin_x": ox,
+            "origin_y": oy,
+            "pred_x": pred_x,
+            "pred_y": pred_y,
+        })
+
+    return {
+        "items": items,
+        "scale_regular": config.EXTRACT_REGULAR_SCALE,
+        "scale_blueprint": config.EXTRACT_BLUEPRINT_SCALE,
+    }

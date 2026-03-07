@@ -214,3 +214,36 @@ export async function evaluateModel(): Promise<EvaluateResponse> {
   }
   return response.json();
 }
+
+// --- Training preview (test set with predictions) ---
+
+export interface TrainingPreviewItem {
+  filename: string;
+  subdir: string;
+  origin_x: number;
+  origin_y: number;
+  pred_x: number;
+  pred_y: number;
+}
+
+export interface TrainingPreviewResponse {
+  items: TrainingPreviewItem[];
+  scale_regular: number;
+  scale_blueprint: number;
+}
+
+/**
+ * Get test set items with ground-truth and predicted origins for box detector.
+ * 404 if no model. Used by Training tab to show preview with boxes.
+ */
+export async function getTrainingPreview(): Promise<TrainingPreviewResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/extract/training/preview`);
+  if (response.status === 404) {
+    throw new Error('No box detector model found. Run training first.');
+  }
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Failed to get training preview: ${response.status} ${text}`);
+  }
+  return response.json();
+}
