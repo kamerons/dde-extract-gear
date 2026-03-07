@@ -1188,6 +1188,12 @@
   border-top: 1px solid #e0e0e0;
 }
 
+.extract-config-preview-format {
+  font-size: 0.85rem;
+  color: #555;
+  margin: 0 0 0.5rem 0;
+}
+
 .extract-config-preview-loading,
 .extract-config-preview-empty {
   color: #666;

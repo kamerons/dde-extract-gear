@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  getTrainingPreview,
+  startPreviewTask,
+  getTrainingTaskStatus,
   getScreenshotUrl,
   fetchBoxes,
   type TrainingPreviewItem,
+  type TrainingPreviewResponse,
   type ExtractBox,
   type ImageType,
 } from '../api/extract';
@@ -15,6 +17,8 @@ function subdirToImageType(subdir: string): ImageType {
   return subdir.includes('blueprint') ? 'blueprint' : 'regular';
 }
 
+const PREVIEW_POLL_INTERVAL_MS = 1500;
+
 export function TrainingPreview() {
   const [items, setItems] = useState<TrainingPreviewItem[]>([]);
   const [scaleRegular, setScaleRegular] = useState<number>(1.0);
@@ -22,30 +26,72 @@ export function TrainingPreview() {
   const [index, setIndex] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [modelFormat, setModelFormat] = useState<string | null>(null);
   const [boxesGt, setBoxesGt] = useState<ExtractBox[]>([]);
   const [boxesPred, setBoxesPred] = useState<ExtractBox[]>([]);
   const [imageSize, setImageSize] = useState<{ width: number; height: number } | null>(null);
   const [imageError, setImageError] = useState<string | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadPreview = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setModelFormat(null);
     try {
-      const res = await getTrainingPreview();
-      setItems(res.items);
-      setScaleRegular(res.scale_regular);
-      setScaleBlueprint(res.scale_blueprint);
-      setIndex(0);
+      const { task_id } = await startPreviewTask();
+      const poll = () => {
+        getTrainingTaskStatus(task_id).then((status) => {
+          if (status.status === 'completed' && status.results) {
+            const res = status.results as TrainingPreviewResponse;
+            if (res.items && Array.isArray(res.items)) {
+              setItems(res.items);
+              setScaleRegular(Number(res.scale_regular) || 1.0);
+              setScaleBlueprint(Number(res.scale_blueprint) || 1.0);
+              setIndex(0);
+            }
+            if (status.model_format) {
+              setModelFormat(status.model_format === 'keras' ? '.keras' : 'HDF5');
+            }
+            if (pollRef.current) {
+              clearInterval(pollRef.current);
+              pollRef.current = null;
+            }
+            setLoading(false);
+          } else if (status.status === 'failed' || status.status === 'cancelled') {
+            setError(status.error ?? (status.status === 'failed' ? 'Preview failed' : 'Cancelled'));
+            setItems([]);
+            if (pollRef.current) {
+              clearInterval(pollRef.current);
+              pollRef.current = null;
+            }
+            setLoading(false);
+          }
+        }).catch((e) => {
+          setError(e instanceof Error ? e.message : 'Failed to get preview status');
+          setItems([]);
+          if (pollRef.current) {
+            clearInterval(pollRef.current);
+            pollRef.current = null;
+          }
+          setLoading(false);
+        });
+      };
+      poll();
+      pollRef.current = setInterval(poll, PREVIEW_POLL_INTERVAL_MS);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load preview');
       setItems([]);
-    } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     loadPreview();
+    return () => {
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+      }
+    };
   }, [loadPreview]);
 
   const item = items[index] ?? null;
@@ -132,6 +178,11 @@ export function TrainingPreview() {
 
   return (
     <div className="extract-config-training-preview">
+      {modelFormat != null && (
+        <p className="extract-config-preview-format" role="status">
+          Model format: {modelFormat}
+        </p>
+      )}
       <div className="extract-config-preview-nav">
         <button
           type="button"

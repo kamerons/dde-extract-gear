@@ -20,6 +20,11 @@ from task.processors.box_detector_processor import (
     _scan_sources,
     _split_train_test,
 )
+from task.processors.evaluation_processor import (
+    _load_box_detector_model as load_box_detector_with_format,
+    run_evaluate as eval_run_evaluate,
+    run_preview as eval_run_preview,
+)
 from shared.recommendation_engine import TaskCancelledError
 
 EVAL_INTERVAL_SEC = 10
@@ -34,12 +39,17 @@ logger = logging.getLogger(__name__)
 
 
 class TaskWorker:
-    """Worker that processes tasks from Redis queues. Only one task runs at a time."""
+    """
+    Worker that processes tasks from Redis queues.
+    One long-running slot (training or recommendation, mutually exclusive) plus
+    a pool of evaluation workers that run in parallel.
+    """
 
     QUEUE_NAME = "recommendation_tasks"
     CURRENT_TASK_KEY = "recommendation_current_task_id"
     TRAINING_QUEUE_NAME = "training_tasks"
     TRAINING_CURRENT_TASK_KEY = "training_current_task_id"
+    EVALUATION_QUEUE_NAME = "evaluation_tasks"
     CURRENT_TASK_EXPIRY = 3600  # seconds (clears if worker dies)
     POLL_INTERVAL = 1.0  # seconds
 
@@ -152,8 +162,6 @@ class TaskWorker:
         repo_root: Path,
     ) -> None:
         """Background thread: every 10s load current model and write test metrics to Redis."""
-        from tensorflow import keras
-
         config = self.config
         # Match processor: checkpoint under DATA_DIR/models/box_detector
         data_dir = repo_root / config.DATA_DIR
@@ -169,7 +177,7 @@ class TaskWorker:
             if not current_path.exists():
                 continue
             try:
-                model = keras.models.load_model(str(current_path))
+                model, _ = load_box_detector_with_format(current_path)
             except Exception as e:
                 logger.debug("Eval thread skip load: %s", e)
                 continue
@@ -353,22 +361,129 @@ class TaskWorker:
             logger.error(f"Failed to process task {task_id}: {error_msg}")
             self.update_task_status(task_id, "failed", error=error_msg)
 
-    def run(self) -> None:
-        """Run the worker loop."""
-        logger.info("Starting task worker...")
-        logger.info(f"Connecting to Redis at {self.config.REDIS_HOST}:{self.config.REDIS_PORT}")
+    def process_evaluation_task(self, task_data: Dict) -> None:
+        """Process a single evaluation task (evaluate or preview)."""
+        task_id = task_data["task_id"]
+        eval_type = task_data.get("type", "evaluate")
 
-        # Test Redis connection
+        logger.info("Processing evaluation task %s (type=%s)", task_id, eval_type)
+
+        self.redis_client.hset(
+            f"task:{task_id}:meta",
+            mapping={"status": "processing", "task_type": "evaluation"}
+        )
+
+        repo_root = Path(__file__).resolve().parent.parent
+        data_dir = (repo_root / self.config.DATA_DIR).resolve()
+
+        try:
+            if eval_type == "evaluate":
+                result = eval_run_evaluate(
+                    data_dir=data_dir,
+                    test_ratio=self.config.BOX_DETECTOR_TEST_RATIO,
+                    shift_regular=self.config.EXTRACT_AUGMENT_SHIFT_REGULAR,
+                    shift_blueprint=self.config.EXTRACT_AUGMENT_SHIFT_BLUEPRINT,
+                    fill_mode=self.config.EXTRACT_AUGMENT_FILL,
+                    augment_count=self.config.EXTRACT_AUGMENT_COUNT,
+                )
+            elif eval_type == "preview":
+                result = eval_run_preview(
+                    data_dir=data_dir,
+                    test_ratio=self.config.BOX_DETECTOR_TEST_RATIO,
+                    shift_regular=self.config.EXTRACT_AUGMENT_SHIFT_REGULAR,
+                    shift_blueprint=self.config.EXTRACT_AUGMENT_SHIFT_BLUEPRINT,
+                    fill_mode=self.config.EXTRACT_AUGMENT_FILL,
+                    augment_count=self.config.EXTRACT_AUGMENT_COUNT,
+                    scale_regular=self.config.EXTRACT_REGULAR_SCALE,
+                    scale_blueprint=self.config.EXTRACT_BLUEPRINT_SCALE,
+                )
+            else:
+                self.update_task_status(
+                    task_id, "failed",
+                    error=f"Unknown evaluation type: {eval_type}",
+                )
+                return
+
+            if "error" in result:
+                self.update_task_status(
+                    task_id, "failed",
+                    error=result.get("message", result.get("error", "Unknown error")),
+                )
+                return
+
+            # Store model_format in Redis for get_task_status to expose
+            model_format = result.pop("model_format", None)
+            if model_format is not None:
+                self.redis_client.setex(
+                    f"task:{task_id}:model_format",
+                    self.CURRENT_TASK_EXPIRY,
+                    model_format,
+                )
+            self.update_task_status(task_id, "completed", results=result)
+            logger.info("Completed evaluation task %s", task_id)
+
+        except Exception as e:
+            error_msg = str(e)
+            logger.exception("Failed to process evaluation task %s", task_id)
+            self.update_task_status(task_id, "failed", error=error_msg)
+
+    def _long_running_loop(self) -> None:
+        """Single thread: process one training or one recommendation at a time."""
+        while self.running:
+            try:
+                task_data_str = self.redis_client.brpop(
+                    [self.TRAINING_QUEUE_NAME, self.QUEUE_NAME],
+                    timeout=int(self.POLL_INTERVAL),
+                )
+                if not task_data_str:
+                    continue
+                queue_name, data = task_data_str
+                task_data = json.loads(data)
+                if queue_name == self.TRAINING_QUEUE_NAME:
+                    self.process_training_task(task_data)
+                else:
+                    self.process_task(task_data)
+            except redis.ConnectionError as e:
+                logger.error("Long-running slot Redis error: %s", e)
+                time.sleep(5)
+            except Exception as e:
+                logger.error("Unexpected error in long-running slot: %s", e)
+                time.sleep(1)
+
+    def _evaluation_worker_loop(self) -> None:
+        """One of N threads: process evaluation tasks from evaluation_tasks queue."""
+        while self.running:
+            try:
+                task_data_str = self.redis_client.brpop(
+                    self.EVALUATION_QUEUE_NAME,
+                    timeout=int(self.POLL_INTERVAL),
+                )
+                if not task_data_str:
+                    continue
+                _queue_name, data = task_data_str
+                task_data = json.loads(data)
+                self.process_evaluation_task(task_data)
+            except redis.ConnectionError as e:
+                logger.error("Evaluation worker Redis error: %s", e)
+                time.sleep(5)
+            except Exception as e:
+                logger.error("Unexpected error in evaluation worker: %s", e)
+                time.sleep(1)
+
+    def run(self) -> None:
+        """Run the worker: one long-running slot thread + evaluation worker pool."""
+        logger.info("Starting task worker...")
+        logger.info("Connecting to Redis at %s:%s", self.config.REDIS_HOST, self.config.REDIS_PORT)
+
         try:
             self.redis_client.ping()
-            logger.info("✓ Connected to Redis")
+            logger.info("Connected to Redis")
         except redis.ConnectionError as e:
-            logger.error(f"✗ Failed to connect to Redis: {e}")
+            logger.error("Failed to connect to Redis: %s", e)
             sys.exit(1)
 
         self.running = True
 
-        # Handle shutdown signals
         def signal_handler(sig, frame):
             logger.info("Received shutdown signal, stopping worker...")
             self.running = False
@@ -376,31 +491,23 @@ class TaskWorker:
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)
 
-        # Main loop: listen to both training and recommendation queues
-        while self.running:
-            try:
-                task_data_str = self.redis_client.brpop(
-                    [self.TRAINING_QUEUE_NAME, self.QUEUE_NAME],
-                    timeout=int(self.POLL_INTERVAL)
-                )
+        # Long-running slot: one thread for training or recommendation
+        long_run_thread = threading.Thread(target=self._long_running_loop, daemon=False)
+        long_run_thread.start()
 
-                if task_data_str:
-                    queue_name, data = task_data_str
-                    task_data = json.loads(data)
-                    if queue_name == self.TRAINING_QUEUE_NAME:
-                        self.process_training_task(task_data)
-                    else:
-                        self.process_task(task_data)
-                else:
-                    continue
+        # Evaluation pool: N threads for evaluate/preview tasks
+        eval_count = self.config.EVALUATION_WORKER_COUNT
+        logger.info("Starting %d evaluation worker(s)", eval_count)
+        eval_threads = [
+            threading.Thread(target=self._evaluation_worker_loop, daemon=False)
+            for _ in range(eval_count)
+        ]
+        for t in eval_threads:
+            t.start()
 
-            except redis.ConnectionError as e:
-                logger.error(f"Redis connection error: {e}")
-                logger.info("Retrying in 5 seconds...")
-                time.sleep(5)
-            except Exception as e:
-                logger.error(f"Unexpected error in worker loop: {e}")
-                time.sleep(1)
+        long_run_thread.join()
+        for t in eval_threads:
+            t.join()
 
         logger.info("Task worker stopped")
 

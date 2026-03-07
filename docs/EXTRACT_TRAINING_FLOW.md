@@ -27,7 +27,7 @@ This document describes how box-detector training, model saving, and the trainin
 4. **API** returns `{ "task_id": "...", "status": "pending" }`.
 5. **Frontend** stores `task_id` and polls `GET /api/tasks/{task_id}` every 2s.
 
-6. **Worker** (`task/worker.py`) main loop uses `brpop([TRAINING_QUEUE_NAME, QUEUE_NAME], timeout=...)`. When a training task is popped from `training_tasks`:
+6. **Worker** (`task/worker.py`) has one **long-running slot thread** that uses `brpop([TRAINING_QUEUE_NAME, QUEUE_NAME], timeout=...)` (so at most one training or one recommendation runs at a time) and an **evaluation worker pool** that consumes from `evaluation_tasks`. When the long-running slot pops a training task from `training_tasks`:
    - Parses `task_data` → `task_id`, `model_type`.
    - Sets `TRAINING_CURRENT_TASK_KEY` to `task_id` (so API knows who is running).
    - Updates `task:{task_id}:meta` to `status: "processing"`.
@@ -78,7 +78,7 @@ This document describes how box-detector training, model saving, and the trainin
 
 1. `data_dir` = `repo_root / config.DATA_DIR`; `stem` = `Path(BOX_DETECTOR_MODEL_PATH).name`; `current_path` = `data_dir / (stem + "_current.keras")` (same layout as processor).
 2. If `current_path` does not exist, skip (no checkpoint yet).
-3. Load model with `keras.models.load_model(str(current_path))`.
+3. Load model with the shared loader (format detection and logging: `.keras` zip vs HDF5); see `task/processors/evaluation_processor._load_box_detector_model`.
 4. Recompute test set: `_labeled_dirs`, `_scan_sources`, `_split_train_test`, then `_build_arrays(..., augment=True)` for a larger test set.
 5. Compute metrics with `_compute_test_metrics(model, X_test, y_test)`.
 6. Write to Redis: `task:{task_id}:eval` = JSON of metrics, TTL 3600s.
@@ -96,18 +96,17 @@ This document describes how box-detector training, model saving, and the trainin
   3. **Legacy:** If `model_dir / (stem + ".keras")` exists → return it.
   4. Otherwise return `None` → API returns **404** with a message that includes the exact path that was checked (e.g. “Looked in …/data/models/box_detector for …”). This makes it clear the API did not find files in that directory; common causes are the API container not sharing the same `data` volume as the worker, or `DATA_DIR` / `BOX_DETECTOR_MODEL_PATH` pointing elsewhere.
 
-**Used by:**
+**Used by:** The API uses path resolution only for **`GET /api/extract/training/model-debug`** (returns paths and listing; the API does not load the model). Evaluate and preview run in the **task container** as evaluation tasks: the client calls `POST /api/extract/training/evaluate` or `POST /api/extract/training/preview`, gets `task_id`, and polls `GET /api/tasks/{task_id}` for results and `model_format`.
 
-- `GET /api/extract/training/evaluate` — loads model, builds **augmented** test set, returns metrics.
-- `GET /api/extract/training/preview` — loads model, builds test set (one per image for items), returns list of items for the frontend to draw boxes.
-
-If the API runs in a **different container** than the worker and does **not** share the same `data` volume, it will never see `_current.keras` or the timestamped/legacy files → 404 until both use the same filesystem for `data`. The 404 response body includes the resolved directory path so you can confirm what the API is looking at; API logs also log `model_dir`, `stem`, and the directory listing when no model is found.
+If the API and worker run in different containers and do not share the same `data` volume, the task worker will not see model files → evaluation tasks fail with a clear error. The task worker resolves the load path the same way (same `model_dir` and stem).
 
 ---
 
-## 6. API: Training Evaluate and Preview
+## 6. Evaluation tasks (evaluate and preview)
 
-**`GET /api/extract/training/preview`:**
+Evaluate and preview run in the **task container** as asynchronous tasks. **`POST /api/extract/training/evaluate`** and **`POST /api/extract/training/preview`** create an evaluation task and return `{ task_id }`; the client polls `GET /api/tasks/{task_id}` for results and `model_format`. The task worker loads the model (with .keras vs HDF5 format detection and logging), runs evaluate or preview, and writes results to Redis. The frontend shows "Model format: .keras" or "HDF5" when available.
+
+**Legacy / reference (task worker does the following for preview):**
 
 1. `load_path, model_dir, stem = _box_detector_load_path()`. If `load_path` is `None` → **404** (detail includes `model_dir` and `stem`).
 2. Load labeled sources from `_data_dir()`: `_labeled_dirs`, `_scan_sources`, `_split_train_test` → get `test_sources`.
@@ -117,7 +116,7 @@ If the API runs in a **different container** than the worker and does **not** sh
 6. For each test item, convert predicted (x,y) from model space back to pixel space; build list of `{ filename, subdir, origin_x, origin_y, pred_x, pred_y }`.
 7. Return `{ items: [...], scale_regular, scale_blueprint }`.
 
-**Frontend** uses this to show test-set images with ground-truth and predicted boxes. Screenshot images are loaded from `GET /api/extract/screenshots/{filename}?subdir=...` (same API host). The browser must be able to reach that host (e.g. `VITE_API_BASE_URL` must be a URL the browser can use, e.g. `http://localhost:8000` in Docker).
+**Frontend** starts a preview task (POST), polls until completed, then shows test-set images with ground-truth and predicted boxes and "Model format: .keras" or "HDF5". Screenshot images are loaded from `GET /api/extract/screenshots/{filename}?subdir=...` (same API host).
 
 ---
 

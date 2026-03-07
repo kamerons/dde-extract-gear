@@ -20,6 +20,7 @@ class TaskService:
     QUEUE_KEY = "recommendation_tasks"
     TRAINING_QUEUE_KEY = "training_tasks"
     TRAINING_CURRENT_TASK_KEY = "training_current_task_id"
+    EVALUATION_QUEUE_KEY = "evaluation_tasks"
 
     def __init__(self):
         """Initialize task service with Redis connection."""
@@ -52,7 +53,7 @@ class TaskService:
         """
         task_id = str(uuid.uuid4())
 
-        # Cancel the currently processing task (if any)
+        # Cancel the currently processing recommendation task (if any)
         current_id = self.redis_client.get(self.CURRENT_TASK_KEY)
         if current_id:
             self.redis_client.setex(
@@ -60,9 +61,9 @@ class TaskService:
                 self.TASK_EXPIRY_SECONDS,
                 "1"
             )
-            logger.info(f"Cancelled previous task {current_id} in favour of {task_id}")
+            logger.info(f"Cancelled previous recommendation task {current_id} in favour of {task_id}")
 
-        # Clear the queue so only the new task will run
+        # Clear only the recommendation queue so the new task is next (do not clear training_tasks)
         self.redis_client.delete(self.QUEUE_KEY)
 
         # Store task metadata
@@ -108,6 +109,7 @@ class TaskService:
             )
             logger.info(f"Cancelled previous training task {current_id} in favour of {task_id}")
 
+        # Clear only the training queue (do not clear recommendation_tasks)
         self.redis_client.delete(self.TRAINING_QUEUE_KEY)
 
         task_meta = {
@@ -125,6 +127,36 @@ class TaskService:
         self.redis_client.rpush(self.TRAINING_QUEUE_KEY, json.dumps(task_data))
 
         logger.info(f"Created training task {task_id}")
+        return task_id
+
+    def create_evaluation_task(self, eval_type: str = "evaluate") -> str:
+        """
+        Create an evaluation task (evaluate or preview). Does not cancel other evaluation tasks.
+
+        Args:
+            eval_type: "evaluate" or "preview"
+
+        Returns:
+            Task ID (UUID string)
+        """
+        if eval_type not in ("evaluate", "preview"):
+            eval_type = "evaluate"
+        task_id = str(uuid.uuid4())
+        task_meta = {
+            "task_id": task_id,
+            "status": "pending",
+            "task_type": "evaluation",
+            "evaluation_type": eval_type,
+            "created_at": datetime.utcnow().isoformat(),
+        }
+        meta_key = f"task:{task_id}:meta"
+        self.redis_client.hset(meta_key, mapping=task_meta)
+        self.redis_client.expire(meta_key, self.TASK_EXPIRY_SECONDS)
+
+        task_data = {"task_id": task_id, "type": eval_type}
+        self.redis_client.rpush(self.EVALUATION_QUEUE_KEY, json.dumps(task_data))
+
+        logger.info(f"Created evaluation task {task_id} (type={eval_type})")
         return task_id
 
     def cancel_training_task(self) -> bool:
@@ -205,6 +237,13 @@ class TaskService:
                 response["latest_eval"] = json.loads(eval_data)
             except json.JSONDecodeError:
                 pass
+
+        # Model format (.keras vs HDF5) when task loaded a box detector model (e.g. evaluation)
+        model_format = self.redis_client.get(f"task:{task_id}:model_format")
+        if model_format is not None:
+            response["model_format"] = model_format
+        elif status == "completed" and response.get("results") and isinstance(response["results"], dict) and "model_format" in response["results"]:
+            response["model_format"] = response["results"]["model_format"]
 
         return response
 

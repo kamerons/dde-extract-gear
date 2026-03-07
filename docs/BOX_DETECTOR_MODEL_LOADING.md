@@ -13,7 +13,7 @@ This document summarizes how box detector models are saved and loaded, the issue
   - `{stem}.keras` — legacy name for the final model.
 - **Stem** comes from `BOX_DETECTOR_MODEL_PATH` (e.g. `data/models/box_detector/box_detector_model` → stem `box_detector_model`).
 
-The API and the task worker must see the same directory (same volume mount in Docker). See [EXTRACT_TRAINING_FLOW.md](EXTRACT_TRAINING_FLOW.md) for the full flow.
+The **task worker** (and only the task worker) loads and runs the box detector model for inference. The API does **not** load the model; evaluate and preview are run as tasks in the task container. The API and task worker must see the same directory (same volume mount in Docker). See [EXTRACT_TRAINING_FLOW.md](EXTRACT_TRAINING_FLOW.md) for the full flow.
 
 ---
 
@@ -63,46 +63,40 @@ Users saw **404** and the message *“Box detector model not found. Run training
 
 **Effect:** New training runs produce proper .keras zip files. Old files (already on disk) are unchanged and will not load until you retrain.
 
-### API: clearer errors and temp-copy workaround
+### Task container: loading and format logging
 
-**File:** `api/routes/extract.py`
+**Files:** `task/processors/evaluation_processor.py`, `task/worker.py`
 
-- **Path resolution:** We resolve `model_dir` and support a “second-chance” resolution from a single directory listing so we don’t 404 when the path is valid but `exists()`/`glob()` were flaky.
-- **Loading:** We load via **`_load_box_detector_model(load_path)`**, which copies the chosen file to a **temporary file** under `/tmp` and calls `keras.models.load_model()` on that path. That was added to work around Keras sometimes failing on bind-mounted paths; it also doesn’t fix files that aren’t valid zips.
-- **Errors:** When Keras fails to load, we log the exception and return a clear message (e.g. “Model file found at … but Keras failed to load it: …”) instead of the generic “Run training first.”
-- **Caching:** Training endpoints send `Cache-Control: no-store` so browsers don’t cache 404s. In dev, `DISABLE_HTTP_CACHE=1` disables caching for all API responses.
+- **Loading:** All model loading and inference run in the task container; the evaluation processor and training eval loop use **`_load_box_detector_model(load_path)`** (temp copy, format detection).
+- **Logging:** When loading, the worker logs e.g. `Loading box detector model from <path> (format: .keras zip)` or `(format: HDF5)`. **UI:** For evaluation tasks, the worker writes `task:{task_id}:model_format` to Redis; the API includes it in `GET /api/tasks/{task_id}`; the frontend can show "Model format: .keras" or "HDF5".
 
-### Docs and debugging
+### API: no model loading
 
-- **EXTRACT_TRAINING_FLOW.md** — Updated to describe the 404 message and that it can include the path we looked in.
-- **Logging** — The preview endpoint logs path resolution and, on load failure, the Keras error and traceback.
-- **`GET /api/extract/training/model-debug`** — Returns resolved paths, stem, and directory listing so you can confirm what the API sees.
+- The API does not load the box detector model. Evaluate and preview are task-based: `POST /api/extract/training/evaluate` and `POST .../preview` return `{ task_id }`; the client polls `GET /api/tasks/{task_id}` for results and `model_format`.
+- **`GET /api/extract/training/model-debug`** returns resolved paths and directory listing (path resolution only; no loading).
 
 ---
 
 ## 4. Current flow (short)
 
-1. **Resolve path**  
-   `_box_detector_load_path()` returns the path to use: `_current.keras` if present, else latest timestamped, else `stem.keras`. If none found, we optionally run a second-chance from the directory listing.
-
-2. **If no path**  
-   Return 404 with a message that includes the directory we looked in and optional debug (listing, etc.).
-
-3. **If path found**  
-   Call `_load_box_detector_model(load_path)`: copy file to a temp path, `keras.models.load_model(temp_path)`, then delete the temp file. On success, run evaluate or preview; on Keras error, log and return 404/500 with the real error message.
-
-4. **Training**  
+1. **Training** (task container only)  
    The processor saves with `keras.saving.save_model()` when available so new checkpoints and final models are valid .keras zip files.
+
+2. **Evaluate / preview** (task container only)  
+   The client calls `POST /api/extract/training/evaluate` or `POST .../preview`; the API enqueues an evaluation task and returns `task_id`. The task worker resolves the load path (same logic: `_current.keras` > latest timestamped > `stem.keras`), loads the model via `_load_box_detector_model` (temp copy, format detection, logging), runs evaluate or preview, and writes results and `model_format` to Redis. The client polls `GET /api/tasks/{task_id}`; the response includes `results` and `model_format` (e.g. `"keras"` or `"hdf5"`) when the task has loaded a model.
+
+3. **API model-debug**  
+   `GET /api/extract/training/model-debug` uses `_box_detector_load_path()` (path resolution only, no loading) so you can confirm paths and listing; the API does not load the model.
 
 ---
 
 ## 5. What you need to do
 
-- **HDF5 models** (file exists but `zipfile.is_zipfile()` is False, e.g. content starts with `\x89HDF`): The API now loads them by copying to a temp `.h5` path, so they work without retraining. New training should still write proper .keras zips (extension-driven save in the trainer).
-- **New models:** Run a **new training** (start training and let it complete or at least save a checkpoint). New files should be saved as proper .keras zips and will load in the API.
+- **HDF5 models** (file exists but `zipfile.is_zipfile()` is False, e.g. content starts with `\x89HDF`): The task container loads them by copying to a temp `.h5` path, so they work without retraining. New training should still write proper .keras zips (extension-driven save in the trainer).
+- **New models:** Run a **new training** (start training and let it complete or at least save a checkpoint). New files should be saved as proper .keras zips and will load in the task container.
 - **Verify (optional):** After a new checkpoint exists, you can confirm it’s a zip, e.g.:
   ```bash
-  docker exec armor_select_api python3 -c "
+  docker exec armor_select_task python3 -c "
   import zipfile
   from pathlib import Path
   p = Path('/app/data/models/box_detector/box_detector_model_current.keras')
@@ -112,12 +106,13 @@ Users saw **404** and the message *“Box detector model not found. Run training
           print('entries:', z.namelist()[:10])
   "
   ```
-  Then use the training preview again; it should load the new model.
+  Then start a training preview from the UI; when it completes, the UI shows the result and "Model format: .keras" or "HDF5".
 
 ---
 
 ## 6. References
 
 - [EXTRACT_TRAINING_FLOW.md](EXTRACT_TRAINING_FLOW.md) — Full training and preview flow.
-- Path resolution and 404 handling: `api/routes/extract.py` (`_box_detector_load_path`, `_load_box_detector_model`, preview/evaluate endpoints).
+- Path resolution (API, for model-debug only): `api/routes/extract.py` (`_box_detector_load_path`).
+- Loading and format logging: `task/processors/evaluation_processor.py` (`_load_box_detector_model`, `run_evaluate`, `run_preview`).
 - Save format: `task/processors/box_detector_processor.py` (`_save_model_native`).

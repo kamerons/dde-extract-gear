@@ -147,9 +147,10 @@ export interface TrainingTaskStatus {
   status: 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled' | 'not_found';
   task_type?: string;
   progress?: { evaluated: number; total_planned: number };
-  results?: Record<string, number | string>;
+  results?: Record<string, unknown>;
   latest_eval?: EvaluateResponse;
   error?: string;
+  model_format?: string;
 }
 
 export interface EvaluateResponse {
@@ -201,16 +202,15 @@ export async function getTrainingTaskStatus(taskId: string): Promise<TrainingTas
 }
 
 /**
- * Evaluate the saved box detector model on the test set. Throws if no model (404).
+ * Start an evaluation task. Poll getTrainingTaskStatus(task_id) until completed; then results contain metrics and model_format.
  */
-export async function evaluateModel(): Promise<EvaluateResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/extract/training/evaluate`);
-  if (response.status === 404) {
-    throw new Error('No box detector model found. Run training first.');
-  }
+export async function startEvaluateTask(): Promise<{ task_id: string; status: string }> {
+  const response = await fetch(`${API_BASE_URL}/api/extract/training/evaluate`, {
+    method: 'POST',
+  });
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(`Failed to evaluate: ${response.status} ${text}`);
+    throw new Error(`Failed to start evaluate: ${response.status} ${text}`);
   }
   return response.json();
 }
@@ -233,46 +233,15 @@ export interface TrainingPreviewResponse {
 }
 
 /**
- * Get test set items with ground-truth and predicted origins for box detector.
- * 404 if no model. Used by Training tab to show preview with boxes.
+ * Start a preview task. Poll getTrainingTaskStatus(task_id) until completed; then results contain items, scale_regular, scale_blueprint, and model_format.
  */
-export async function getTrainingPreview(): Promise<TrainingPreviewResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/extract/training/preview`);
-  const text = await response.text();
-  if (response.status === 404) {
-    let message = 'No box detector model found. Run training first.';
-    let debug: { model_dir?: string; stem?: string; model_dir_exists?: boolean; current_exists?: boolean; listing?: string[] } | undefined;
-    try {
-      const body = JSON.parse(text) as {
-        detail?: string | { message?: string; debug?: typeof debug };
-      };
-      if (typeof body.detail === 'string') {
-        message = body.detail;
-      } else if (body.detail && typeof body.detail === 'object' && body.detail.message) {
-        message = body.detail.message;
-        debug = body.detail.debug;
-      }
-    } catch {
-      // use default message
-    }
-    if (debug) {
-      message += '\n\nServer saw: ' + JSON.stringify(debug, null, 2);
-    }
-    throw new Error(message);
-  }
+export async function startPreviewTask(): Promise<{ task_id: string; status: string }> {
+  const response = await fetch(`${API_BASE_URL}/api/extract/training/preview`, {
+    method: 'POST',
+  });
   if (!response.ok) {
-    let message = `Failed to get training preview: ${response.status}`;
-    try {
-      const body = JSON.parse(text) as { detail?: string };
-      if (typeof body.detail === 'string') message = body.detail;
-    } catch {
-      if (text) message += ` ${text}`;
-    }
-    throw new Error(message);
+    const text = await response.text();
+    throw new Error(`Failed to start preview: ${response.status} ${text}`);
   }
-  try {
-    return JSON.parse(text) as TrainingPreviewResponse;
-  } catch {
-    throw new Error('Invalid response from server (training preview).');
-  }
+  return response.json();
 }

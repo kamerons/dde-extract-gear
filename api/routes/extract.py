@@ -1,10 +1,6 @@
 """Extract pipeline endpoints: screenshots, region boxes, and box detector training."""
 
 import logging
-import re
-import shutil
-import tempfile
-import zipfile
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
@@ -116,29 +112,6 @@ def _box_detector_404_debug(model_dir: Path, stem: str) -> dict:
         "current_exists": current_path.exists(),
         "listing": listing,
     }
-
-
-def _load_box_detector_model(load_path: Path):
-    """
-    Load Keras model from path. Copies to a temp file then loads, so Keras can read it
-    reliably (it often raises 'File not found' on bind-mounted paths even when the file exists).
-    If the file is not a .keras zip (e.g. legacy HDF5 saved with .keras extension), we copy
-    to a temp file with .h5 suffix so load_model treats it as HDF5.
-    """
-    from tensorflow import keras
-
-    is_zip = zipfile.is_zipfile(load_path)
-    suffix = ".keras" if is_zip else ".h5"
-    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
-        tmp_path = Path(f.name)
-    try:
-        shutil.copy2(load_path, tmp_path)
-        # HDF5 from tf.keras (task) can have compile config that this Keras can't deserialize;
-        # we only need the model for inference, so skip loading loss/optimizer/metrics.
-        compile_load = True if is_zip else False
-        return keras.models.load_model(str(tmp_path), compile=compile_load)
-    finally:
-        tmp_path.unlink(missing_ok=True)
 
 
 def _screenshot_path(filename: str, subdir: str = "unlabeled/screenshots") -> Path:
@@ -340,238 +313,29 @@ async def training_stop():
     return {"ok": True, "cancelled": cancelled, "message": "Training cancel requested" if cancelled else "No training task was running"}
 
 
-@router.get("/api/extract/training/evaluate")
-async def training_evaluate():
+@router.post("/api/extract/training/evaluate")
+async def training_evaluate_start():
     """
-    Evaluate the saved box detector model on the test set (same split logic as training).
-    Returns test metrics. 404 if no model exists.
+    Start an evaluation task: run box detector on the test set.
+    Returns task_id; poll GET /api/tasks/{task_id} for results (metrics) and model_format.
     """
-    from task.processors.box_detector_processor import (
-        _build_arrays,
-        _compute_test_metrics,
-        _labeled_dirs,
-        _scan_sources,
-        _split_train_test,
-    )
-
-    load_path, model_dir, stem = _box_detector_load_path()
-    if load_path is None:
-        current_path = model_dir / (stem + "_current.keras")
-        legacy_path = model_dir / (stem + ".keras")
-        if current_path.exists():
-            load_path = current_path
-        else:
-            timestamped = sorted(
-                model_dir.glob(f"{stem}_[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]_[0-9][0-9][0-9][0-9][0-9][0-9].keras"),
-                key=lambda p: p.stat().st_mtime,
-                reverse=True,
-            )
-            if timestamped:
-                load_path = timestamped[0]
-            elif legacy_path.exists():
-                load_path = legacy_path
-    if load_path is None:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "message": _box_detector_not_found_detail(model_dir, stem),
-                "debug": _box_detector_404_debug(model_dir, stem),
-            },
-        )
-
-    data_dir = _data_dir()
-    labeled = _labeled_dirs(data_dir)
-    if not labeled:
-        raise HTTPException(
-            status_code=400,
-            detail="No labeled screenshots found.",
-        )
-    sources = _scan_sources(labeled)
-    if not sources:
-        raise HTTPException(
-            status_code=400,
-            detail="No valid (image, .txt) pairs found.",
-        )
-    _, test_sources = _split_train_test(sources, config.BOX_DETECTOR_TEST_RATIO)
-    if not test_sources:
-        raise HTTPException(
-            status_code=400,
-            detail="No test set after split.",
-        )
-
-    X_test, y_test = _build_arrays(
-        test_sources,
-        augment=True,
-        shift_regular=config.EXTRACT_AUGMENT_SHIFT_REGULAR,
-        shift_blueprint=config.EXTRACT_AUGMENT_SHIFT_BLUEPRINT,
-        fill_mode=config.EXTRACT_AUGMENT_FILL,
-        augment_count=config.EXTRACT_AUGMENT_COUNT,
-    )
-
     try:
-        model = _load_box_detector_model(load_path)
+        task_id = task_service.create_evaluation_task(eval_type="evaluate")
     except Exception as e:
-        err_msg = str(e)
-        logger.warning(
-            "training_evaluate: Keras load_model failed for path=%s: %s",
-            load_path, err_msg,
-            exc_info=True,
-        )
-        if isinstance(e, ValueError) and ("File not found" in err_msg or "filepath=" in err_msg):
-            raise HTTPException(
-                status_code=404,
-                detail={
-                    "message": f"Model file found at {load_path} but Keras failed to load it: {err_msg}",
-                    "debug": {"load_path": str(load_path), "error": err_msg},
-                },
-            ) from e
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to load box detector model from {load_path}: {err_msg}",
-        ) from e
-
-    metrics = _compute_test_metrics(model, X_test, y_test)
-    return metrics
+        logger.exception("Failed to create evaluation task")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    return {"task_id": task_id, "status": "pending"}
 
 
-@router.get("/api/extract/training/preview")
-async def training_preview():
+@router.post("/api/extract/training/preview")
+async def training_preview_start():
     """
-    Return test set items with ground-truth and predicted origins for box detector.
-    Frontend can draw boxes for both and show next/previous. 404 if no model.
+    Start a preview task: test set items with ground-truth and predicted origins.
+    Returns task_id; poll GET /api/tasks/{task_id} for results (items, scale_regular, scale_blueprint) and model_format.
     """
-    from task.processors.box_detector_processor import (
-        INPUT_HEIGHT,
-        INPUT_WIDTH,
-        _build_arrays,
-        _labeled_dirs,
-        _load_image,
-        _scan_sources,
-        _split_train_test,
-    )
-
-    load_path, model_dir, stem = _box_detector_load_path()
-    logger.info(
-        "training_preview: after _box_detector_load_path: load_path=%s, model_dir=%s, stem=%s",
-        load_path, model_dir, stem,
-    )
-    # Second-chance: resolve from one debug snapshot (same source for decision and 404 body)
-    debug = None
-    if load_path is None:
-        debug = _box_detector_404_debug(model_dir, stem)
-        logger.info(
-            "training_preview: second-chance debug snapshot: current_exists=%s, model_dir_exists=%s, listing=%s",
-            debug.get("current_exists"), debug.get("model_dir_exists"), debug.get("listing"),
-        )
-        if debug.get("current_exists"):
-            load_path = model_dir / (stem + "_current.keras")
-            logger.info("training_preview: second-chance resolved from current_exists -> %s", load_path)
-        elif debug.get("listing"):
-            current_name = stem + "_current.keras"
-            legacy_name = stem + ".keras"
-            if current_name in debug["listing"]:
-                load_path = model_dir / current_name
-                logger.info("training_preview: second-chance resolved from listing (current) -> %s", load_path)
-            elif legacy_name in debug["listing"]:
-                load_path = model_dir / legacy_name
-                logger.info("training_preview: second-chance resolved from listing (legacy) -> %s", load_path)
-            else:
-                ts_pattern = re.compile(rf"^{re.escape(stem)}_(\d{{8}})_(\d{{6}})\.keras$")
-                timestamped = [n for n in debug["listing"] if ts_pattern.match(n)]
-                timestamped.sort(reverse=True)
-                if timestamped:
-                    load_path = model_dir / timestamped[0]
-                    logger.info("training_preview: second-chance resolved from listing (timestamped) -> %s", load_path)
-    if load_path is None:
-        logger.warning(
-            "training_preview: RAISING 404 — load_path still None after second-chance. "
-            "model_dir=%s stem=%s debug_current_exists=%s debug_listing=%s",
-            model_dir, stem, debug.get("current_exists") if debug else None, debug.get("listing") if debug else None,
-        )
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "message": _box_detector_not_found_detail(model_dir, stem),
-                "debug": debug if debug is not None else _box_detector_404_debug(model_dir, stem),
-            },
-        )
-
-    logger.info(
-        "training_preview: load_path=%s, model_dir=%s, stem=%s",
-        load_path, model_dir, stem,
-    )
-    data_dir = _data_dir()
-    labeled = _labeled_dirs(data_dir)
-    if not labeled:
-        raise HTTPException(
-            status_code=400,
-            detail="No labeled screenshots found.",
-        )
-    sources = _scan_sources(labeled)
-    if not sources:
-        raise HTTPException(
-            status_code=400,
-            detail="No valid (image, .txt) pairs found.",
-        )
-    _, test_sources = _split_train_test(sources, config.BOX_DETECTOR_TEST_RATIO)
-    if not test_sources:
-        raise HTTPException(
-            status_code=400,
-            detail="No test set after split.",
-        )
-
-    X_test, _ = _build_arrays(
-        test_sources,
-        augment=False,
-        shift_regular=config.EXTRACT_AUGMENT_SHIFT_REGULAR,
-        shift_blueprint=config.EXTRACT_AUGMENT_SHIFT_BLUEPRINT,
-        fill_mode=config.EXTRACT_AUGMENT_FILL,
-        augment_count=config.EXTRACT_AUGMENT_COUNT,
-    )
-
     try:
-        model = _load_box_detector_model(load_path)
+        task_id = task_service.create_evaluation_task(eval_type="preview")
     except Exception as e:
-        err_msg = str(e)
-        logger.warning(
-            "training_preview: Keras load_model failed for path=%s: %s",
-            load_path, err_msg,
-            exc_info=True,
-        )
-        if isinstance(e, ValueError) and ("File not found" in err_msg or "filepath=" in err_msg):
-            raise HTTPException(
-                status_code=404,
-                detail={
-                    "message": f"Model file found at {load_path} but Keras failed to load it: {err_msg}",
-                    "debug": {"load_path": str(load_path), "error": err_msg},
-                },
-            ) from e
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to load box detector model from {load_path}: {err_msg}",
-        ) from e
-    pred = model.predict(X_test, verbose=0)
-
-    items = []
-    for i, (typename, filename, png_path, ox, oy) in enumerate(test_sources):
-        img = _load_image(png_path)
-        w, h = img.size
-        scale_x = INPUT_WIDTH / w
-        scale_y = INPUT_HEIGHT / h
-        pred_x = int(round(float(pred[i, 0]) / scale_x))
-        pred_y = int(round(float(pred[i, 1]) / scale_y))
-        subdir = f"labeled/screenshots/{typename}"
-        items.append({
-            "filename": filename,
-            "subdir": subdir,
-            "origin_x": ox,
-            "origin_y": oy,
-            "pred_x": pred_x,
-            "pred_y": pred_y,
-        })
-
-    return {
-        "items": items,
-        "scale_regular": config.EXTRACT_REGULAR_SCALE,
-        "scale_blueprint": config.EXTRACT_BLUEPRINT_SCALE,
-    }
+        logger.exception("Failed to create preview task")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    return {"task_id": task_id, "status": "pending"}

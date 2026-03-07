@@ -23,6 +23,10 @@ class Config:
     # Data directory for extract pipeline
     DATA_DIR: str = os.getenv("DATA_DIR", "data")
 
+    # Extract pipeline: scale factors (for preview response)
+    EXTRACT_REGULAR_SCALE: float = float(os.getenv("EXTRACT_REGULAR_SCALE", "1.0"))
+    EXTRACT_BLUEPRINT_SCALE: float = float(os.getenv("EXTRACT_BLUEPRINT_SCALE", "1.0"))
+
     # Extract pipeline: augmentation (for box detector training)
     EXTRACT_AUGMENT_SHIFT_REGULAR: float = float(
         os.getenv("EXTRACT_AUGMENT_SHIFT_REGULAR", "0.1")
@@ -51,6 +55,11 @@ class Config:
         "BOX_DETECTOR_MODEL_PATH", "data/box_detector_model"
     )
     TRAINING_EPOCHS: int = max(1, int(os.getenv("TRAINING_EPOCHS", "50")))
+
+    # Evaluation task worker pool size (runs in parallel with long-running slot)
+    EVALUATION_WORKER_COUNT: int = max(
+        1, min(int(os.getenv("EVALUATION_WORKER_COUNT", "4")), 32)
+    )
 
     @property
     def redis_url(self) -> str:
