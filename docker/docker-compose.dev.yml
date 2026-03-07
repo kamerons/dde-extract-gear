@@ -1,5 +1,3 @@
-version: "3.8"
-
 # Development override for docker-compose.yml
 # Use with: docker compose -f docker/docker-compose.yml -f docker/docker-compose.dev.yml up
 
@@ -9,29 +7,28 @@ services:
     command:
       [
         "uvicorn",
-        "armor_select.api.main:app",
+        "api.main:app",
         "--host",
         "0.0.0.0",
         "--port",
         "8000",
         "--reload",
       ]
-    # Mount source code for hot-reload
+    # Mount source code for hot-reload (paths relative to compose file dir = docker/)
     volumes:
-      - ../../data:/app/data:ro
-      - ../../armor_select:/app/armor_select
-      - ../../requirements.txt:/app/requirements.txt
-    # Don't rebuild, use existing image or build without cache
+      - ../data:/app/data:ro
+      - ..:/app
+      - ../requirements.txt:/app/requirements.txt
     build:
-      context: ../..
-      dockerfile: armor_select/docker/Dockerfile.api
+      context: ..
+      dockerfile: docker/Dockerfile.api
 
   task:
     # Mount source code (worker will need manual restart for changes)
     volumes:
-      - ../../data:/app/data:ro
-      - ../../armor_select:/app/armor_select
-      - ../../requirements.txt:/app/requirements.txt
+      - ../data:/app/data:ro
+      - ..:/app
+      - ../requirements.txt:/app/requirements.txt
     # Note: Python workers don't auto-reload, you'll need to restart the container
     # or use a tool like watchdog
 

@@ -6,7 +6,7 @@
 
 **Frontend (with hot-reload):**
 ```bash
-cd armor_select/frontend
+cd frontend
 npm install
 npm run dev
 ```
@@ -17,13 +17,13 @@ Frontend will be available at `http://localhost:5173` (Vite default) with hot-re
 # Install dependencies
 pip install -r requirements.txt
 
-# Run with auto-reload
-uvicorn armor_select.api.main:app --host 0.0.0.0 --port 8000 --reload
+# Run with auto-reload (from repo root)
+uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 **Task Worker:**
 ```bash
-python -m armor_select.task.worker
+python -m task.worker
 ```
 
 **Redis:**
@@ -36,11 +36,11 @@ docker run -d -p 6379:6379 redis:7-alpine
 Use the development override file:
 
 ```bash
-# Start all services with hot-reload for API
-docker compose -f armor_select/docker/docker-compose.yml -f armor_select/docker/docker-compose.dev.yml up
+# Start all services with hot-reload for API (from repo root)
+docker compose -f docker/docker-compose.yml -f docker/docker-compose.dev.yml up
 
 # Frontend: Still run locally for best hot-reload experience
-cd armor_select/frontend
+cd frontend
 npm run dev
 ```
 
@@ -55,11 +55,11 @@ npm run dev
 - **API, Task, Redis**: Run in Docker with dev overrides
 
 ```bash
-# Terminal 1: Start backend services
-docker compose -f armor_select/docker/docker-compose.yml -f armor_select/docker/docker-compose.dev.yml up api task redis
+# Terminal 1: Start backend services (from repo root)
+docker compose -f docker/docker-compose.yml -f docker/docker-compose.dev.yml up api task redis
 
 # Terminal 2: Start frontend locally
-cd armor_select/frontend
+cd frontend
 npm run dev
 ```
 
@@ -68,7 +68,7 @@ npm run dev
 For production, use the standard docker-compose:
 
 ```bash
-python armor_select/start.py start
+python start.py start
 ```
 
 This builds production images without hot-reload.

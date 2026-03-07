@@ -6,8 +6,10 @@ WORKDIR /app
 COPY requirements.txt /app/
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the armor_select package
-COPY armor_select/ /app/armor_select/
+# Copy application packages
+COPY api/ /app/api/
+COPY shared/ /app/shared/
+COPY task/ /app/task/
 
 # Run the task worker
-CMD ["python", "-m", "armor_select.task.worker"]
+CMD ["python", "-m", "task.worker"]

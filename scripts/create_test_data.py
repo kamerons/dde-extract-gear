@@ -1,10 +1,16 @@
-"""Create a fake collected.json file for testing."""
+"""Create a fake collected.json file for testing. Run from repo root: python3 scripts/create_test_data.py"""
 
 import json
 import random
+import sys
 from pathlib import Path
 
-from extract_gear.constants import ARMOR_TYPES, SET_TYPES
+# Ensure repo root is on path so shared is importable when run as script
+_repo_root = Path(__file__).resolve().parent.parent
+if str(_repo_root) not in sys.path:
+    sys.path.insert(0, str(_repo_root))
+
+from shared.armor_constants import ARMOR_TYPES, SET_TYPES
 
 
 def create_test_collected_json(
@@ -23,12 +29,8 @@ def create_test_collected_json(
     if seed is not None:
         random.seed(seed)
 
-    # Get absolute path relative to repo root
-    # From armor_select/scripts/create_test_data.py:
-    # .parent = armor_select/scripts
-    # .parent.parent = armor_select
-    # .parent.parent.parent = repo root (dde-extract-gear)
-    repo_root = Path(__file__).parent.parent.parent
+    # Get absolute path relative to repo root (scripts/ is under repo root)
+    repo_root = Path(__file__).parent.parent
     data_path = repo_root / output_path
 
     # Ensure data directory exists

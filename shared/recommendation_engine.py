@@ -8,8 +8,8 @@ from functools import lru_cache
 from typing import Callable, Dict, List, Optional, Tuple
 from itertools import product
 
-from armor_select.shared.constraint_manager import ConstraintManager
-from armor_select.shared.stat_normalizer import StatNormalizer
+from shared.constraint_manager import ConstraintManager
+from shared.stat_normalizer import StatNormalizer
 
 logger = logging.getLogger(__name__)
 

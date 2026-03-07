@@ -38,9 +38,7 @@ def get_compose_files():
 
 def get_project_root():
     """Get the project root directory (where docker-compose.yml context should be)."""
-    script_dir = Path(__file__).parent
-    # Go up from armor_select/ to repo root
-    return script_dir.parent
+    return Path(__file__).parent
 
 
 def start_containers():
@@ -63,7 +61,7 @@ def start_containers():
     print(f"  Dev:  {dev_file}")
     print("\n  API: http://localhost:8000  (hot-reload on)")
     print("  Redis: localhost:6379")
-    print("  Frontend: disabled in dev — run 'npm run dev' in armor_select/frontend for Vite HMR")
+    print("  Frontend: disabled in dev — run 'npm run dev' in frontend/ for Vite HMR")
     print("  Stop with Ctrl+C, or run: python start.py stop\n")
 
     try:

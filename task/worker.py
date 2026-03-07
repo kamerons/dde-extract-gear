@@ -8,9 +8,9 @@ import time
 from typing import Dict, Optional
 
 import redis
-from armor_select.task.config import Config
-from armor_select.task.processors.recommendation_processor import RecommendationProcessor
-from armor_select.shared.recommendation_engine import TaskCancelledError
+from task.config import Config
+from task.processors.recommendation_processor import RecommendationProcessor
+from shared.recommendation_engine import TaskCancelledError
 
 # Configure logging
 logging.basicConfig(

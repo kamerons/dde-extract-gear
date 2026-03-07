@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from typing import Dict, List
 
-from armor_select.shared.models import ArmorPiece
+from shared.models import ArmorPiece
 
 
 class DataLoader:
@@ -32,8 +32,8 @@ class DataLoader:
             FileNotFoundError: If data file doesn't exist
             ValueError: If data file is invalid or empty
         """
-        # Get absolute path relative to repo root
-        repo_root = Path(__file__).parent.parent.parent
+        # Get absolute path relative to repo root (shared/ is under repo root)
+        repo_root = Path(__file__).parent.parent
         data_path = repo_root / self.data_file
 
         if not data_path.exists():

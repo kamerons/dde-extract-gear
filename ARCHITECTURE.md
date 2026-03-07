@@ -25,34 +25,36 @@ The Armor Selection System is a React + Python server application that helps use
 ### Directory Structure
 
 ```
-armor_select/
-├── backend/
-│   ├── recommendation_engine.py    # Main optimization logic
+(repo root)
+├── api/                             # FastAPI app
+│   ├── main.py                       # App entry
+│   ├── config.py
+│   ├── routes/                      # recommendations, tasks
+│   └── services/                    # task_service
+├── shared/
+│   ├── recommendation_engine.py      # Main optimization logic
 │   ├── constraint_manager.py        # Hard constraints & soft caps
-│   ├── upgrade_calculator.py        # Upgrade calculations
-│   ├── future_proof_scorer.py      # Potential value scoring
-│   ├── incremental_evaluator.py     # Partial replacement evaluation
-│   ├── preference_adjuster.py       # Lightweight preference learning
-│   ├── stat_normalizer.py          # Stat normalization by type
-│   ├── feedback_handler.py          # Process user feedback
-│   ├── data_loader.py              # Load JSON armor data
-│   └── api.py                      # FastAPI/Flask endpoints
+│   ├── stat_normalizer.py           # Stat normalization by type
+│   ├── data_loader.py               # Load JSON armor data
+│   ├── models.py
+│   ├── armor_constants.py           # ARMOR_TYPES, SET_TYPES
+│   └── ...
+├── task/                            # Redis task worker
+│   ├── worker.py
+│   ├── config.py
+│   └── processors/
 ├── frontend/
 │   ├── src/
 │   │   ├── components/
 │   │   │   ├── RecommendationCard.tsx      # Display recommended set
-│   │   │   ├── StatComparison.tsx          # Show stat differences
-│   │   │   ├── FeedbackPanel.tsx           # Collect user feedback
-│   │   │   ├── PreferenceEditor.tsx        # Manual weight adjustment
-│   │   │   ├── ConstraintEditor.tsx        # Set min/max constraints
-│   │   │   ├── SoftCapEditor.tsx           # Set soft cap thresholds
 │   │   │   ├── UpgradePreview.tsx          # Show upgraded stats
-│   │   │   ├── IncrementalChangeView.tsx   # Show partial replacements
-│   │   │   └── WasteIndicator.tsx          # Highlight wasted points
-│   │   ├── hooks/
-│   │   │   └── useRecommendations.ts      # API integration
+│   │   │   ├── WasteIndicator.tsx          # Highlight wasted points
+│   │   │   └── ...
 │   │   └── App.tsx
 │   └── package.json
+├── docker/                          # Dockerfiles and compose
+├── scripts/                         # e.g. create_test_data.py
+├── legacy/                          # Reference only (extract_gear, etc.)
 └── ARCHITECTURE.md                  # This file
 ```
 
@@ -747,20 +749,20 @@ Shows stats with upgrades applied:
 - Generate complete sets upfront
 
 ### Stat Types
-From `extract_gear/index.py`:
+From `legacy/extract_gear/index.py` (and used by shared recommendation engine):
 - `base`, `fire`, `electric`, `poison`
 - `hero_hp`, `hero_dmg`, `hero_rate`, `hero_speed`
 - `offense`, `defense`
 - `tower_hp`, `tower_dmg`, `tower_rate`, `tower_range`
 
 ### Armor Types
-From `extract_gear/constants.py` (7 types total):
+From `shared/armor_constants.py` (and legacy `extract_gear/constants.py`) (7 types total):
 - `shoulder_pad`, `mask`, `hat`, `greaves`, `shield`, `bracer`, `belt`
 
 Note: A complete armor set requires all 7 armor types from the same set. Each complete set must have exactly one piece of each armor type (shoulder_pad, mask, hat, greaves, shield, bracer, belt), and all pieces must belong to the same set (e.g., all from "Leather Armor Set" or all from "Knight Set").
 
 ### Set Types
-From `extract_gear/constants.py` (8 types total):
+From `shared/armor_constants.py` (and legacy `extract_gear/constants.py`) (8 types total):
 - `Chain Armor Set`, `Dark Lord's Set`, `Dragon Slayer Set`
 - `Goblin Raider Set`, `Great Hero Set`, `Leather Armor Set`
 - `Knight Set`, `Plate Armor Set`

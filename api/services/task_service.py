@@ -7,7 +7,7 @@ from typing import Dict, Optional, Any
 from datetime import datetime, timedelta
 
 import redis
-from armor_select.api.config import Config
+from api.config import Config
 
 logger = logging.getLogger(__name__)
 

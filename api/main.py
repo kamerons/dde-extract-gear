@@ -7,9 +7,9 @@ from typing import Dict
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from armor_select.shared.data_loader import DataLoader
-from armor_select.shared.recommendation_engine import RecommendationEngine
-from armor_select.api.routes import recommendations, tasks
+from shared.data_loader import DataLoader
+from shared.recommendation_engine import RecommendationEngine
+from api.routes import recommendations, tasks
 
 # Configure logging
 logging.basicConfig(

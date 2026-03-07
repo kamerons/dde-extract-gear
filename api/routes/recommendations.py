@@ -5,14 +5,14 @@ from typing import Dict
 
 from fastapi import APIRouter, HTTPException, Query
 
-from armor_select.shared.models import (
+from shared.models import (
     RecommendationRequest,
     RecommendationResponse,
     Recommendation,
     RecommendationPiece
 )
-from armor_select.shared.recommendation_engine import RecommendationEngine, TooManyCombinationsError
-from armor_select.api.services.task_service import TaskService
+from shared.recommendation_engine import RecommendationEngine, TooManyCombinationsError
+from api.services.task_service import TaskService
 
 logger = logging.getLogger(__name__)
 

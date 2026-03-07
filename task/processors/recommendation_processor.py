@@ -3,8 +3,8 @@
 import logging
 from typing import Callable, Dict, List, Optional
 
-from armor_select.shared.data_loader import DataLoader
-from armor_select.shared.recommendation_engine import (
+from shared.data_loader import DataLoader
+from shared.recommendation_engine import (
     RecommendationEngine,
     TooManyCombinationsError,
     TaskCancelledError,
