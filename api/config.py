@@ -3,6 +3,10 @@
 import os
 from typing import Optional
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 
 class Config:
     """Configuration settings for the API."""

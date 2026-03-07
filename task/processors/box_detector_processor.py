@@ -6,6 +6,8 @@ number of epochs. Supports progress callback and cancellation.
 """
 
 import logging
+import os
+from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -36,6 +38,29 @@ def _model_save_path(path: Path) -> Path:
     if s.endswith(".keras") or s.endswith(".h5"):
         return p
     return Path(s + ".keras")
+
+
+def _relax_path_for_host(path: Path, *, is_dir: bool = False) -> None:
+    """Set permissions so the host user can read/write/delete (e.g. when running in Docker as root)."""
+    try:
+        os.chmod(path, 0o777 if is_dir else 0o666)
+    except OSError as e:
+        logger.warning("Could not chmod %s: %s", path, e)
+
+
+def _save_model_native(model, path: Path) -> None:
+    """Save model in native Keras format (.keras zip) so load_model can read it."""
+    from tensorflow import keras
+    save_path = _model_save_path(Path(path)) if not str(path).endswith(".keras") else Path(path)
+    path_str = str(save_path.resolve())
+    # Use extension to drive format: .keras -> zip archive (Keras 3). Avoid save_format="keras"
+    # because in some TF 2.x versions it writes legacy HDF5 instead of the zip.
+    if hasattr(keras, "saving") and hasattr(keras.saving, "save_model"):
+        keras.saving.save_model(model, path_str)
+    else:
+        # Path must end with .keras so TF 2.15+ writes the zip format, not HDF5.
+        model.save(path_str)
+    _relax_path_for_host(save_path, is_dir=False)
 
 
 def _labeled_dirs(data_dir: Path) -> list[tuple[str, Path]]:
@@ -154,7 +179,7 @@ def _compute_test_metrics(model, X_test: np.ndarray, y_test: np.ndarray) -> dict
 
 
 class BoxDetectorProcessor:
-    """Processes box detector training tasks: incremental data, fixed test set, fixed epochs."""
+    """Processes box detector training: re-scans each epoch so train/test grow with new labels; test set augmented for metrics."""
 
     def __init__(
         self,
@@ -185,8 +210,9 @@ class BoxDetectorProcessor:
         check_cancelled: Optional[Callable[[], bool]] = None,
     ) -> dict:
         """
-        Run box detector training. Re-scans labeled dirs each epoch to add new data to training.
-        Test set is fixed at run start. Raises TaskCancelledError if check_cancelled returns True.
+        Run box detector training. Re-scans labeled dirs each epoch; train and test sets
+        grow as new images are labeled. Test set is augmented for larger evaluation.
+        Raises TaskCancelledError if check_cancelled returns True.
         """
         labeled = _labeled_dirs(self._data_dir_abs)
         if not labeled:
@@ -195,34 +221,26 @@ class BoxDetectorProcessor:
                 "message": "No labeled screenshots found in data/labeled/screenshots/regular or blueprint.",
             }
 
-        sources_all = _scan_sources(labeled)
-        if not sources_all:
+        sources_initial = _scan_sources(labeled)
+        if not sources_initial:
             return {
                 "error": "no_valid_sources",
                 "message": "No (image, .txt) pairs found.",
             }
 
-        initial_train, test_sources = _split_train_test(sources_all, self.test_ratio)
-        test_key = {(t, n) for t, n, *_ in test_sources}
-
-        X_test, y_test = _build_arrays(
-            test_sources,
-            augment=False,
-            shift_regular=self.augment_shift_regular,
-            shift_blueprint=self.augment_shift_blueprint,
-            fill_mode=self.augment_fill,
-            augment_count=self.augment_count,
-        )
-
-        if len(initial_train) == 0:
+        train_initial, test_initial = _split_train_test(sources_initial, self.test_ratio)
+        if len(train_initial) == 0:
             return {
                 "error": "no_train_sources",
                 "message": "No training samples after split (test_ratio may be too high).",
             }
 
         model = _build_model()
-        model_path_abs = (self._repo / self.model_path).resolve()
-        model_path_abs.parent.mkdir(parents=True, exist_ok=True)
+        # Save under data/models/box_detector so we always write to the mounted volume
+        save_dir = self._data_dir_abs / "models" / "box_detector"
+        stem = Path(self.model_path).name
+        save_dir.mkdir(parents=True, exist_ok=True)
+        _relax_path_for_host(save_dir, is_dir=True)
 
         for epoch in range(1, self.epochs + 1):
             if check_cancelled and check_cancelled():
@@ -230,15 +248,22 @@ class BoxDetectorProcessor:
 
             labeled_now = _labeled_dirs(self._data_dir_abs)
             sources_now = _scan_sources(labeled_now)
-            train_sources_this_epoch = [
-                s for s in sources_now
-                if (s[0], s[1]) not in test_key
-            ]
-            if not train_sources_this_epoch:
-                train_sources_this_epoch = initial_train
+            if not sources_now:
+                continue
+            train_sources, test_sources = _split_train_test(sources_now, self.test_ratio)
+            if not train_sources:
+                train_sources = train_initial
 
             X_train, y_train = _build_arrays(
-                train_sources_this_epoch,
+                train_sources,
+                augment=True,
+                shift_regular=self.augment_shift_regular,
+                shift_blueprint=self.augment_shift_blueprint,
+                fill_mode=self.augment_fill,
+                augment_count=self.augment_count,
+            )
+            X_test_aug, y_test_aug = _build_arrays(
+                test_sources,
                 augment=True,
                 shift_regular=self.augment_shift_regular,
                 shift_blueprint=self.augment_shift_blueprint,
@@ -249,7 +274,7 @@ class BoxDetectorProcessor:
             if X_train.shape[0] == 0:
                 continue
 
-            validation_data = (X_test, y_test) if len(X_test) > 0 else None
+            validation_data = (X_test_aug, y_test_aug) if len(X_test_aug) > 0 else None
             hist = model.fit(
                 X_train, y_train,
                 epochs=1,
@@ -267,23 +292,50 @@ class BoxDetectorProcessor:
                 "mae": round(mae, 4),
                 "val_mae": round(val_mae, 4),
                 "train_samples": int(X_train.shape[0]),
-                "test_samples": int(X_test.shape[0]),
+                "test_samples": int(X_test_aug.shape[0]),
             }
-            test_metrics = _compute_test_metrics(model, X_test, y_test)
+            test_metrics = _compute_test_metrics(model, X_test_aug, y_test_aug)
             metrics.update(test_metrics)
 
             if progress_callback:
                 progress_callback(epoch, self.epochs, metrics)
 
             # Save current checkpoint so background eval thread can load it every 10s
-            current_path = model_path_abs.parent / (model_path_abs.name + "_current")
-            model.save(str(_model_save_path(current_path)))
+            current_path = save_dir / (stem + "_current.keras")
+            logger.info("Saving checkpoint to %s", current_path)
+            _save_model_native(model, current_path)
+            if not current_path.exists():
+                logger.warning("Checkpoint file missing after save: %s", current_path)
 
             if check_cancelled and check_cancelled():
                 raise TaskCancelledError()
 
-        model.save(str(_model_save_path(model_path_abs)))
-        final_metrics = _compute_test_metrics(model, X_test, y_test)
+        # Final split from current sources for last metrics
+        labeled_final = _labeled_dirs(self._data_dir_abs)
+        sources_final = _scan_sources(labeled_final)
+        _, test_sources_final = _split_train_test(sources_final, self.test_ratio)
+        X_test_final, y_test_final = _build_arrays(
+            test_sources_final,
+            augment=True,
+            shift_regular=self.augment_shift_regular,
+            shift_blueprint=self.augment_shift_blueprint,
+            fill_mode=self.augment_fill,
+            augment_count=self.augment_count,
+        )
+
+        # Save final model: timestamped + legacy (always under data dir)
+        timestamped_name = stem + "_" + datetime.now().strftime("%Y%m%d_%H%M%S") + ".keras"
+        timestamped_path = save_dir / timestamped_name
+        legacy_path = save_dir / (stem + ".keras")
+        logger.info("Saving final model to %s and %s", timestamped_path, legacy_path)
+        _save_model_native(model, timestamped_path)
+        _save_model_native(model, legacy_path)
+        if not timestamped_path.exists():
+            logger.error("Timestamped model file missing after save: %s", timestamped_path)
+        if not legacy_path.exists():
+            logger.error("Legacy model file missing after save: %s", legacy_path)
+
+        final_metrics = _compute_test_metrics(model, X_test_final, y_test_final)
         final_metrics["epochs"] = self.epochs
         final_metrics["status"] = "completed"
         return final_metrics

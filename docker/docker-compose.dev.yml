@@ -3,6 +3,8 @@
 
 services:
   api:
+    environment:
+      - DISABLE_HTTP_CACHE=1
     # Override command to enable hot-reload
     command:
       [

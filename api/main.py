@@ -1,11 +1,14 @@
 """FastAPI application for armor selection API."""
 
 import logging
+import os
 from contextlib import asynccontextmanager
 from typing import Dict
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
 
 from shared.data_loader import DataLoader
 from shared.recommendation_engine import RecommendationEngine
@@ -65,6 +68,23 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# In dev, disable HTTP caching for all responses (set DISABLE_HTTP_CACHE=1 in docker-compose.dev)
+_DISABLE_HTTP_CACHE = os.environ.get("DISABLE_HTTP_CACHE", "").strip().lower() in ("1", "true", "yes")
+
+
+class NoCacheTrainingMiddleware(BaseHTTPMiddleware):
+    """Prevent caching of /api/extract/training/* (always), or all routes when DISABLE_HTTP_CACHE=1 (dev)."""
+
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        if _DISABLE_HTTP_CACHE or request.url.path.startswith("/api/extract/training"):
+            response.headers["Cache-Control"] = "no-store, must-revalidate"
+        return response
+
+
+app.add_middleware(NoCacheTrainingMiddleware)
 
 # Include routers
 app.include_router(recommendations.router)

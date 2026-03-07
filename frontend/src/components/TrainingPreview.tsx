@@ -25,6 +25,7 @@ export function TrainingPreview() {
   const [boxesGt, setBoxesGt] = useState<ExtractBox[]>([]);
   const [boxesPred, setBoxesPred] = useState<ExtractBox[]>([]);
   const [imageSize, setImageSize] = useState<{ width: number; height: number } | null>(null);
+  const [imageError, setImageError] = useState<string | null>(null);
 
   const loadPreview = useCallback(async () => {
     setLoading(true);
@@ -50,6 +51,12 @@ export function TrainingPreview() {
   const item = items[index] ?? null;
   const imageType = item ? subdirToImageType(item.subdir) : 'regular';
   const scale = imageType === 'blueprint' ? scaleBlueprint : scaleRegular;
+
+  // Reset image state when switching to another item
+  useEffect(() => {
+    setImageSize(null);
+    setImageError(null);
+  }, [item?.filename, item?.subdir]);
 
   useEffect(() => {
     if (!item) {
@@ -113,7 +120,7 @@ export function TrainingPreview() {
   if (error || items.length === 0) {
     return (
       <div className="extract-config-training-preview">
-        <p className="extract-config-preview-empty">
+        <p className="extract-config-preview-empty" style={{ whiteSpace: 'pre-wrap' }}>
           {error ?? 'No test set or no model. Run training first.'}
         </p>
       </div>
@@ -151,8 +158,14 @@ export function TrainingPreview() {
         style={{
           width: displayWidth || 'auto',
           height: displayHeight || 'auto',
+          minHeight: 120,
         }}
       >
+        {imageError && (
+          <p className="extract-config-preview-empty" style={{ padding: '0.5rem' }}>
+            {imageError}
+          </p>
+        )}
         <img
           src={getScreenshotUrl(item.filename, item.subdir)}
           alt={`Test sample ${index + 1}`}
@@ -160,10 +173,15 @@ export function TrainingPreview() {
           style={{
             width: displayWidth || undefined,
             height: displayHeight || undefined,
+            display: imageError ? 'none' : undefined,
           }}
           onLoad={(e) => {
+            setImageError(null);
             const img = e.currentTarget;
             setImageSize({ width: img.naturalWidth, height: img.naturalHeight });
+          }}
+          onError={() => {
+            setImageError('Screenshot failed to load. Check API base URL (e.g. VITE_API_BASE_URL) if using Docker.');
           }}
           draggable={false}
         />

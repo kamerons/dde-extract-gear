@@ -10,8 +10,51 @@ import { OriginScaleEditor } from './OriginScaleEditor';
 import { TrainingPreview } from './TrainingPreview';
 
 const TRAINING_POLL_INTERVAL_MS = 2000;
+const EVAL_COUNTDOWN_SIZE = 56;
+const EVAL_COUNTDOWN_STROKE = 4;
+const EVAL_COUNTDOWN_R = (EVAL_COUNTDOWN_SIZE - EVAL_COUNTDOWN_STROKE) / 2;
+const EVAL_COUNTDOWN_CIRCUMFERENCE = 2 * Math.PI * EVAL_COUNTDOWN_R;
+
+function EvalCountdownCircle({ progress }: { progress: number }) {
+  const offset = EVAL_COUNTDOWN_CIRCUMFERENCE * (1 - Math.min(1, progress));
+  return (
+    <svg
+      className="extract-config-eval-countdown"
+      width={EVAL_COUNTDOWN_SIZE}
+      height={EVAL_COUNTDOWN_SIZE}
+      viewBox={`0 0 ${EVAL_COUNTDOWN_SIZE} ${EVAL_COUNTDOWN_SIZE}`}
+      aria-hidden
+    >
+      <circle
+        className="extract-config-eval-countdown-bg"
+        cx={EVAL_COUNTDOWN_SIZE / 2}
+        cy={EVAL_COUNTDOWN_SIZE / 2}
+        r={EVAL_COUNTDOWN_R}
+        fill="none"
+        strokeWidth={EVAL_COUNTDOWN_STROKE}
+      />
+      <circle
+        className="extract-config-eval-countdown-fill"
+        cx={EVAL_COUNTDOWN_SIZE / 2}
+        cy={EVAL_COUNTDOWN_SIZE / 2}
+        r={EVAL_COUNTDOWN_R}
+        fill="none"
+        strokeWidth={EVAL_COUNTDOWN_STROKE}
+        strokeDasharray={EVAL_COUNTDOWN_CIRCUMFERENCE}
+        strokeDashoffset={offset}
+        transform={`rotate(-90 ${EVAL_COUNTDOWN_SIZE / 2} ${EVAL_COUNTDOWN_SIZE / 2})`}
+      />
+    </svg>
+  );
+}
+
+const EVAL_COUNTDOWN_DURATION_MS = 10000;
 
 type ModelSubTab = 'box_detector' | 'type' | 'digit';
+
+function evalResponseKey(e: EvaluateResponse): string {
+  return `${e.test_mae_x}-${e.test_mae_y}-${e.accuracy_within_5px}`;
+}
 
 export function ExtractTraining() {
   const [modelSubTab, setModelSubTab] = useState<ModelSubTab>('box_detector');
@@ -21,12 +64,17 @@ export function ExtractTraining() {
   const [trainingResults, setTrainingResults] = useState<Record<string, number | string> | null>(null);
   const [trainingError, setTrainingError] = useState<string | null>(null);
   const [latestEval, setLatestEval] = useState<EvaluateResponse | null>(null);
+  const [evalCountdownStart, setEvalCountdownStart] = useState<number | null>(null);
+  const [evalCountdownProgress, setEvalCountdownProgress] = useState(0);
   const trainingPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const prevEvalKeyRef = useRef<string | null>(null);
 
   const handleStartTraining = useCallback(async () => {
     setTrainingError(null);
     setTrainingResults(null);
     setLatestEval(null);
+    setEvalCountdownStart(null);
+    prevEvalKeyRef.current = null;
     try {
       const { task_id } = await startTraining();
       setTrainingTaskId(task_id);
@@ -55,7 +103,14 @@ export function ExtractTraining() {
         setTrainingStatus(res.status);
         if (res.progress) setTrainingProgress(res.progress);
         if (res.results) setTrainingResults(res.results);
-        if (res.latest_eval != null) setLatestEval(res.latest_eval);
+        if (res.latest_eval != null) {
+          const key = evalResponseKey(res.latest_eval);
+          if (prevEvalKeyRef.current !== key) {
+            prevEvalKeyRef.current = key;
+            setLatestEval(res.latest_eval);
+            setEvalCountdownStart(Date.now());
+          }
+        }
         if (res.error) setTrainingError(res.error);
         if (res.status === 'completed' || res.status === 'failed' || res.status === 'cancelled' || res.status === 'not_found') {
           setTrainingTaskId(null);
@@ -72,6 +127,17 @@ export function ExtractTraining() {
       trainingPollRef.current = null;
     };
   }, [trainingTaskId, trainingStatus]);
+
+  useEffect(() => {
+    if (trainingStatus !== 'processing' || latestEval == null || evalCountdownStart == null) return;
+    const tick = () => {
+      const elapsed = Date.now() - evalCountdownStart;
+      setEvalCountdownProgress(Math.min(1, elapsed / EVAL_COUNTDOWN_DURATION_MS));
+    };
+    tick();
+    const id = setInterval(tick, 100);
+    return () => clearInterval(id);
+  }, [trainingStatus, latestEval, evalCountdownStart]);
 
   return (
     <div className="configuration-container extract-config extract-config--training-page">
@@ -184,7 +250,10 @@ export function ExtractTraining() {
           )}
           {trainingStatus === 'processing' && latestEval && (
             <div className="extract-config-evaluate-results" role="status">
-              <p className="stat-section-label">Test set (live, every 10s)</p>
+              <div className="extract-config-evaluate-results-header">
+                <p className="stat-section-label">Test set</p>
+                <EvalCountdownCircle progress={evalCountdownProgress} />
+              </div>
               <ul>
                 <li>Test MAE X: {latestEval.test_mae_x.toFixed(4)}</li>
                 <li>Test MAE Y: {latestEval.test_mae_y.toFixed(4)}</li>

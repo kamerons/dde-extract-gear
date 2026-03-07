@@ -1,0 +1,15 @@
+---
+description: Docker is run via start.py; do not assume containers are brought up other ways
+alwaysApply: true
+---
+
+# Docker: Use start.py
+
+**`start.py` is the canonical way to run Docker in this repo.** There is no expectation that containers will be brought up in any other way (e.g. raw `docker compose` from a different directory or with different compose files).
+
+- **Start:** `python start.py start` (or `python start.py start --build` to force image rebuild).
+- **Stop:** `python start.py stop`.
+
+The script sets project root, uses both `docker-compose.yml` and `docker-compose.dev.yml`, and ensures consistent volume mounts and flags. If new Docker commands or flags are needed, add them to `start.py` (or the compose files it uses)—do not document or suggest one-off `docker compose` invocations as the way to run the stack.
+
+It is still acceptable to ask the user to **exec into containers** for particular reasons (e.g. `docker exec armor_select_api ls -la /app/data/models/box_detector` for debugging).

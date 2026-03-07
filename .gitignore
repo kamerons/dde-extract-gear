@@ -5,6 +5,7 @@ env
 *.json
 data/*.keras
 data/*.txt
+data/models/
 .vscode
 
 venv/

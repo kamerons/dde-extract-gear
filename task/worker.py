@@ -155,9 +155,13 @@ class TaskWorker:
         from tensorflow import keras
 
         config = self.config
-        # Match processor: current checkpoint is saved with .keras extension
-        current_path = repo_root / (config.BOX_DETECTOR_MODEL_PATH + "_current.keras")
+        # Match processor: checkpoint under DATA_DIR/models/box_detector
         data_dir = repo_root / config.DATA_DIR
+        model_dir = data_dir / "models" / "box_detector"
+        stem = Path(config.BOX_DETECTOR_MODEL_PATH).name
+        if stem.endswith(".keras") or stem.endswith(".h5"):
+            stem = Path(stem).stem
+        current_path = model_dir / (stem + "_current.keras")
 
         while True:
             if stop_event.wait(timeout=EVAL_INTERVAL_SEC):
@@ -183,7 +187,7 @@ class TaskWorker:
                     continue
                 X_test, y_test = _build_arrays(
                     test_sources,
-                    augment=False,
+                    augment=True,
                     shift_regular=config.EXTRACT_AUGMENT_SHIFT_REGULAR,
                     shift_blueprint=config.EXTRACT_AUGMENT_SHIFT_BLUEPRINT,
                     fill_mode=config.EXTRACT_AUGMENT_FILL,

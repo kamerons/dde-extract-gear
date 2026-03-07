@@ -1,6 +1,10 @@
 """Extract pipeline endpoints: screenshots, region boxes, and box detector training."""
 
 import logging
+import re
+import shutil
+import tempfile
+import zipfile
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
@@ -41,6 +45,100 @@ def _repo_root() -> Path:
 def _data_dir() -> Path:
     """Return absolute path to data directory (relative to repo root)."""
     return (_repo_root() / config.DATA_DIR).resolve()
+
+
+def _box_detector_load_path() -> tuple[Path | None, Path, str]:
+    """
+    Path to load for box detector: interim _current (during training), latest
+    timestamped final model (stem_YYYYMMDD_HHMMSS.keras), or legacy stem.keras.
+    All under DATA_DIR/models/box_detector to match the processor.
+    Returns (load_path or None, model_dir, stem) so callers can show where we looked on 404.
+    """
+    model_dir = (_data_dir() / "models" / "box_detector").resolve()
+    stem = Path(config.BOX_DETECTOR_MODEL_PATH).name
+    if stem.endswith(".keras") or stem.endswith(".h5"):
+        stem = Path(stem).stem
+    current_path = model_dir / (stem + "_current.keras")
+    legacy_path = model_dir / (stem + ".keras")
+
+    # 1) During training: use current checkpoint
+    if current_path.exists():
+        return (current_path, model_dir, stem)
+    # 2) Latest timestamped final model (saved when training completes)
+    timestamped = sorted(
+        model_dir.glob(f"{stem}_[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]_[0-9][0-9][0-9][0-9][0-9][0-9].keras"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    if timestamped:
+        return (timestamped[0], model_dir, stem)
+    # 3) Legacy single file
+    if legacy_path.exists():
+        return (legacy_path, model_dir, stem)
+
+    # Log why we found nothing so logs show what the API actually sees
+    try:
+        exists = model_dir.exists()
+        listing = list(model_dir.iterdir()) if exists else []
+        logger.warning(
+            "Box detector model not found: model_dir=%s (exists=%s), stem=%s, files=%s. "
+            "Check DATA_DIR, BOX_DETECTOR_MODEL_PATH, and that the API has the same data volume as the worker.",
+            model_dir, exists, stem, [p.name for p in listing[:20]],
+        )
+    except OSError as e:
+        logger.warning(
+            "Box detector model not found: model_dir=%s, stem=%s; listdir failed: %s",
+            model_dir, stem, e,
+        )
+    return (None, model_dir, stem)
+
+
+def _box_detector_not_found_detail(model_dir: Path, stem: str) -> str:
+    """Message for 404 when no box detector model is found; includes path we looked in."""
+    return (
+        f"Box detector model not found. Looked in {model_dir} for "
+        f"{stem}_current.keras, {stem}_<timestamp>.keras, or {stem}.keras. "
+        "Run training first or check DATA_DIR and BOX_DETECTOR_MODEL_PATH (and volume mount if using Docker)."
+    )
+
+
+def _box_detector_404_debug(model_dir: Path, stem: str) -> dict:
+    """Debug info to include in 404 response so the client can see what the API saw."""
+    current_path = model_dir / (stem + "_current.keras")
+    try:
+        listing = sorted(p.name for p in model_dir.iterdir()) if model_dir.exists() else []
+    except OSError as e:
+        listing = [f"listdir error: {e}"]
+    return {
+        "model_dir": str(model_dir),
+        "stem": stem,
+        "model_dir_exists": model_dir.exists(),
+        "current_exists": current_path.exists(),
+        "listing": listing,
+    }
+
+
+def _load_box_detector_model(load_path: Path):
+    """
+    Load Keras model from path. Copies to a temp file then loads, so Keras can read it
+    reliably (it often raises 'File not found' on bind-mounted paths even when the file exists).
+    If the file is not a .keras zip (e.g. legacy HDF5 saved with .keras extension), we copy
+    to a temp file with .h5 suffix so load_model treats it as HDF5.
+    """
+    from tensorflow import keras
+
+    is_zip = zipfile.is_zipfile(load_path)
+    suffix = ".keras" if is_zip else ".h5"
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
+        tmp_path = Path(f.name)
+    try:
+        shutil.copy2(load_path, tmp_path)
+        # HDF5 from tf.keras (task) can have compile config that this Keras can't deserialize;
+        # we only need the model for inference, so skip loading loss/optimizer/metrics.
+        compile_load = True if is_zip else False
+        return keras.models.load_model(str(tmp_path), compile=compile_load)
+    finally:
+        tmp_path.unlink(missing_ok=True)
 
 
 def _screenshot_path(filename: str, subdir: str = "unlabeled/screenshots") -> Path:
@@ -86,6 +184,33 @@ async def get_extract_config():
         "augment_shift_regular": config.EXTRACT_AUGMENT_SHIFT_REGULAR,
         "augment_shift_blueprint": config.EXTRACT_AUGMENT_SHIFT_BLUEPRINT,
         "augment_fill": config.EXTRACT_AUGMENT_FILL,
+    }
+
+
+@router.get("/api/extract/training/model-debug")
+async def training_model_debug():
+    """
+    Return resolved box-detector paths and config as seen by this process.
+    Use to debug 404s when models exist on disk (e.g. volume vs config).
+    """
+    load_path, model_dir, stem = _box_detector_load_path()
+    current_path = model_dir / (stem + "_current.keras")
+    legacy_path = model_dir / (stem + ".keras")
+    try:
+        listing = [p.name for p in model_dir.iterdir()] if model_dir.exists() else []
+    except OSError as e:
+        listing = [f"error: {e}"]
+    return {
+        "DATA_DIR": config.DATA_DIR,
+        "BOX_DETECTOR_MODEL_PATH": config.BOX_DETECTOR_MODEL_PATH,
+        "model_dir": str(model_dir),
+        "stem": stem,
+        "current_path": str(current_path),
+        "current_exists": current_path.exists(),
+        "legacy_path": str(legacy_path),
+        "legacy_exists": legacy_path.exists(),
+        "listing": sorted(listing),
+        "load_path": str(load_path) if load_path else None,
     }
 
 
@@ -229,17 +354,29 @@ async def training_evaluate():
         _split_train_test,
     )
 
-    # Processor saves with .keras extension; support both for backwards compatibility
-    model_path = _repo_root() / config.BOX_DETECTOR_MODEL_PATH
-    load_path = (
-        model_path
-        if model_path.exists()
-        else Path(str(model_path) + ".keras")
-    )
-    if not load_path.exists():
+    load_path, model_dir, stem = _box_detector_load_path()
+    if load_path is None:
+        current_path = model_dir / (stem + "_current.keras")
+        legacy_path = model_dir / (stem + ".keras")
+        if current_path.exists():
+            load_path = current_path
+        else:
+            timestamped = sorted(
+                model_dir.glob(f"{stem}_[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]_[0-9][0-9][0-9][0-9][0-9][0-9].keras"),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )
+            if timestamped:
+                load_path = timestamped[0]
+            elif legacy_path.exists():
+                load_path = legacy_path
+    if load_path is None:
         raise HTTPException(
             status_code=404,
-            detail="Box detector model not found. Run training first.",
+            detail={
+                "message": _box_detector_not_found_detail(model_dir, stem),
+                "debug": _box_detector_404_debug(model_dir, stem),
+            },
         )
 
     data_dir = _data_dir()
@@ -264,15 +401,35 @@ async def training_evaluate():
 
     X_test, y_test = _build_arrays(
         test_sources,
-        augment=False,
+        augment=True,
         shift_regular=config.EXTRACT_AUGMENT_SHIFT_REGULAR,
         shift_blueprint=config.EXTRACT_AUGMENT_SHIFT_BLUEPRINT,
         fill_mode=config.EXTRACT_AUGMENT_FILL,
         augment_count=config.EXTRACT_AUGMENT_COUNT,
     )
 
-    from tensorflow import keras
-    model = keras.models.load_model(str(load_path))
+    try:
+        model = _load_box_detector_model(load_path)
+    except Exception as e:
+        err_msg = str(e)
+        logger.warning(
+            "training_evaluate: Keras load_model failed for path=%s: %s",
+            load_path, err_msg,
+            exc_info=True,
+        )
+        if isinstance(e, ValueError) and ("File not found" in err_msg or "filepath=" in err_msg):
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "message": f"Model file found at {load_path} but Keras failed to load it: {err_msg}",
+                    "debug": {"load_path": str(load_path), "error": err_msg},
+                },
+            ) from e
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to load box detector model from {load_path}: {err_msg}",
+        ) from e
+
     metrics = _compute_test_metrics(model, X_test, y_test)
     return metrics
 
@@ -293,18 +450,56 @@ async def training_preview():
         _split_train_test,
     )
 
-    model_path = _repo_root() / config.BOX_DETECTOR_MODEL_PATH
-    load_path = (
-        model_path
-        if model_path.exists()
-        else Path(str(model_path) + ".keras")
+    load_path, model_dir, stem = _box_detector_load_path()
+    logger.info(
+        "training_preview: after _box_detector_load_path: load_path=%s, model_dir=%s, stem=%s",
+        load_path, model_dir, stem,
     )
-    if not load_path.exists():
+    # Second-chance: resolve from one debug snapshot (same source for decision and 404 body)
+    debug = None
+    if load_path is None:
+        debug = _box_detector_404_debug(model_dir, stem)
+        logger.info(
+            "training_preview: second-chance debug snapshot: current_exists=%s, model_dir_exists=%s, listing=%s",
+            debug.get("current_exists"), debug.get("model_dir_exists"), debug.get("listing"),
+        )
+        if debug.get("current_exists"):
+            load_path = model_dir / (stem + "_current.keras")
+            logger.info("training_preview: second-chance resolved from current_exists -> %s", load_path)
+        elif debug.get("listing"):
+            current_name = stem + "_current.keras"
+            legacy_name = stem + ".keras"
+            if current_name in debug["listing"]:
+                load_path = model_dir / current_name
+                logger.info("training_preview: second-chance resolved from listing (current) -> %s", load_path)
+            elif legacy_name in debug["listing"]:
+                load_path = model_dir / legacy_name
+                logger.info("training_preview: second-chance resolved from listing (legacy) -> %s", load_path)
+            else:
+                ts_pattern = re.compile(rf"^{re.escape(stem)}_(\d{{8}})_(\d{{6}})\.keras$")
+                timestamped = [n for n in debug["listing"] if ts_pattern.match(n)]
+                timestamped.sort(reverse=True)
+                if timestamped:
+                    load_path = model_dir / timestamped[0]
+                    logger.info("training_preview: second-chance resolved from listing (timestamped) -> %s", load_path)
+    if load_path is None:
+        logger.warning(
+            "training_preview: RAISING 404 — load_path still None after second-chance. "
+            "model_dir=%s stem=%s debug_current_exists=%s debug_listing=%s",
+            model_dir, stem, debug.get("current_exists") if debug else None, debug.get("listing") if debug else None,
+        )
         raise HTTPException(
             status_code=404,
-            detail="Box detector model not found. Run training first.",
+            detail={
+                "message": _box_detector_not_found_detail(model_dir, stem),
+                "debug": debug if debug is not None else _box_detector_404_debug(model_dir, stem),
+            },
         )
 
+    logger.info(
+        "training_preview: load_path=%s, model_dir=%s, stem=%s",
+        load_path, model_dir, stem,
+    )
     data_dir = _data_dir()
     labeled = _labeled_dirs(data_dir)
     if not labeled:
@@ -334,8 +529,27 @@ async def training_preview():
         augment_count=config.EXTRACT_AUGMENT_COUNT,
     )
 
-    from tensorflow import keras
-    model = keras.models.load_model(str(load_path))
+    try:
+        model = _load_box_detector_model(load_path)
+    except Exception as e:
+        err_msg = str(e)
+        logger.warning(
+            "training_preview: Keras load_model failed for path=%s: %s",
+            load_path, err_msg,
+            exc_info=True,
+        )
+        if isinstance(e, ValueError) and ("File not found" in err_msg or "filepath=" in err_msg):
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "message": f"Model file found at {load_path} but Keras failed to load it: {err_msg}",
+                    "debug": {"load_path": str(load_path), "error": err_msg},
+                },
+            ) from e
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to load box detector model from {load_path}: {err_msg}",
+        ) from e
     pred = model.predict(X_test, verbose=0)
 
     items = []
