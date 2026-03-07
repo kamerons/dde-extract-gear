@@ -72,8 +72,7 @@ Users saw **404** and the message *“Box detector model not found. Run training
 
 ### API: no model loading
 
-- The API does not load the box detector model. Evaluate and preview are task-based: `POST /api/extract/training/evaluate` and `POST .../preview` return `{ task_id }`; the client polls `GET /api/tasks/{task_id}` for results and `model_format`.
-- **`GET /api/extract/training/model-debug`** returns resolved paths and directory listing (path resolution only; no loading).
+- The API does not load the box detector model. Evaluate and preview run in the task container; the client gets results via task status or the latest-preview endpoint (see below).
 
 ---
 
@@ -83,10 +82,7 @@ Users saw **404** and the message *“Box detector model not found. Run training
    The processor saves with `keras.saving.save_model()` when available so new checkpoints and final models are valid .keras zip files.
 
 2. **Evaluate / preview** (task container only)  
-   The client calls `POST /api/extract/training/evaluate` or `POST .../preview`; the API enqueues an evaluation task and returns `task_id`. The task worker resolves the load path (same logic: `_current.keras` > latest timestamped > `stem.keras`), loads the model via `_load_box_detector_model` (temp copy, format detection, logging), runs evaluate or preview, and writes results and `model_format` to Redis. The client polls `GET /api/tasks/{task_id}`; the response includes `results` and `model_format` (e.g. `"keras"` or `"hdf5"`) when the task has loaded a model.
-
-3. **API model-debug**  
-   `GET /api/extract/training/model-debug` uses `_box_detector_load_path()` (path resolution only, no loading) so you can confirm paths and listing; the API does not load the model.
+   The client can call `POST /api/extract/training/evaluate` or `POST .../preview` to run a one-off evaluation task; the API enqueues it and returns `task_id`; the client polls `GET /api/tasks/{task_id}` for results and `model_format`. During **training**, the worker’s background eval loop (and on completion) automatically runs the current model on the test set and writes preview data (items, scales) to Redis. The frontend polls `GET /api/extract/training/preview/latest` to get the latest preview and display it; no manual “Run preview” is required.
 
 ---
 
@@ -106,13 +102,14 @@ Users saw **404** and the message *“Box detector model not found. Run training
           print('entries:', z.namelist()[:10])
   "
   ```
-  Then start a training preview from the UI; when it completes, the UI shows the result and "Model format: .keras" or "HDF5".
+  The training UI automatically shows the latest preview (polling `GET /api/extract/training/preview/latest`) as the model is updated during and after training.
 
 ---
 
 ## 6. References
 
 - [EXTRACT_TRAINING_FLOW.md](EXTRACT_TRAINING_FLOW.md) — Full training and preview flow.
-- Path resolution (API, for model-debug only): `api/routes/extract.py` (`_box_detector_load_path`).
-- Loading and format logging: `task/processors/evaluation_processor.py` (`_load_box_detector_model`, `run_evaluate`, `run_preview`).
+- Path resolution in API: `api/routes/extract.py` (`_box_detector_load_path`).
+- Loading and format logging: `task/processors/evaluation_processor.py` (`_load_box_detector_model`, `run_evaluate`, `run_preview`, `build_preview_items`).
 - Save format: `task/processors/box_detector_processor.py` (`_save_model_native`).
+- Latest preview endpoint: `GET /api/extract/training/preview/latest` returns the most recent preview written by the worker’s eval loop or on training completion.

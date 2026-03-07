@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  startPreviewTask,
-  getTrainingTaskStatus,
+  getLatestPreview,
   getScreenshotUrl,
   fetchBoxes,
   type TrainingPreviewItem,
@@ -17,86 +16,68 @@ function subdirToImageType(subdir: string): ImageType {
   return subdir.includes('blueprint') ? 'blueprint' : 'regular';
 }
 
-const PREVIEW_POLL_INTERVAL_MS = 1500;
+const PREVIEW_POLL_INTERVAL_MS = 2500;
 
-export function TrainingPreview() {
+export interface TrainingPreviewProps {
+  /** When set (e.g. from task status poll), preview is synced with training spinner and shows immediately. */
+  latestPreview?: TrainingPreviewResponse | null;
+}
+
+export function TrainingPreview({ latestPreview }: TrainingPreviewProps) {
   const [items, setItems] = useState<TrainingPreviewItem[]>([]);
   const [scaleRegular, setScaleRegular] = useState<number>(1.0);
   const [scaleBlueprint, setScaleBlueprint] = useState<number>(1.0);
   const [index, setIndex] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [modelFormat, setModelFormat] = useState<string | null>(null);
   const [boxesGt, setBoxesGt] = useState<ExtractBox[]>([]);
   const [boxesPred, setBoxesPred] = useState<ExtractBox[]>([]);
   const [imageSize, setImageSize] = useState<{ width: number; height: number } | null>(null);
   const [imageError, setImageError] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const loadPreview = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    setModelFormat(null);
-    try {
-      const { task_id } = await startPreviewTask();
-      const poll = () => {
-        getTrainingTaskStatus(task_id).then((status) => {
-          if (status.status === 'completed' && status.results) {
-            const res = status.results as TrainingPreviewResponse;
-            if (res.items && Array.isArray(res.items)) {
-              setItems(res.items);
-              setScaleRegular(Number(res.scale_regular) || 1.0);
-              setScaleBlueprint(Number(res.scale_blueprint) || 1.0);
-              setIndex(0);
-            }
-            if (status.model_format) {
-              setModelFormat(status.model_format === 'keras' ? '.keras' : 'HDF5');
-            }
-            if (pollRef.current) {
-              clearInterval(pollRef.current);
-              pollRef.current = null;
-            }
-            setLoading(false);
-          } else if (status.status === 'failed' || status.status === 'cancelled') {
-            setError(status.error ?? (status.status === 'failed' ? 'Preview failed' : 'Cancelled'));
-            setItems([]);
-            if (pollRef.current) {
-              clearInterval(pollRef.current);
-              pollRef.current = null;
-            }
-            setLoading(false);
-          }
-        }).catch((e) => {
-          setError(e instanceof Error ? e.message : 'Failed to get preview status');
+  const pollLatest = useCallback(() => {
+    getLatestPreview()
+      .then((preview) => {
+        if (preview && preview.items.length > 0) {
+          setItems(preview.items);
+          setScaleRegular(preview.scale_regular);
+          setScaleBlueprint(preview.scale_blueprint);
+          setError(null);
+          setIndex((i) => (i >= preview.items.length ? 0 : i));
+        } else {
           setItems([]);
-          if (pollRef.current) {
-            clearInterval(pollRef.current);
-            pollRef.current = null;
-          }
-          setLoading(false);
-        });
-      };
-      poll();
-      pollRef.current = setInterval(poll, PREVIEW_POLL_INTERVAL_MS);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load preview');
-      setItems([]);
-      setLoading(false);
-    }
+        }
+      })
+      .catch((e) => {
+        setError(e instanceof Error ? e.message : 'Failed to load preview');
+        setItems([]);
+      })
+      .finally(() => {
+        setLoading(false);
+      });
   }, []);
 
   useEffect(() => {
-    loadPreview();
+    pollLatest();
+    pollRef.current = setInterval(pollLatest, PREVIEW_POLL_INTERVAL_MS);
     return () => {
       if (pollRef.current) {
         clearInterval(pollRef.current);
+        pollRef.current = null;
       }
     };
-  }, [loadPreview]);
+  }, [pollLatest]);
 
-  const item = items[index] ?? null;
+  const fromProp = latestPreview?.items?.length ? latestPreview : null;
+  const displayItems = fromProp?.items ?? items;
+  const displayScaleRegular = fromProp ? fromProp.scale_regular : scaleRegular;
+  const displayScaleBlueprint = fromProp ? fromProp.scale_blueprint : scaleBlueprint;
+
+  const safeIndex = displayItems.length > 0 ? Math.min(index, displayItems.length - 1) : 0;
+  const item = displayItems[safeIndex] ?? null;
   const imageType = item ? subdirToImageType(item.subdir) : 'regular';
-  const scale = imageType === 'blueprint' ? scaleBlueprint : scaleRegular;
+  const scale = imageType === 'blueprint' ? displayScaleBlueprint : displayScaleRegular;
 
   // Reset image state when switching to another item
   useEffect(() => {
@@ -133,16 +114,22 @@ export function TrainingPreview() {
   }, [item, scale, imageType]);
 
   const handlePrev = useCallback(() => {
-    setIndex((i) => (i <= 0 ? items.length - 1 : i - 1));
-  }, [items.length]);
+    setIndex((i) => (i <= 0 ? displayItems.length - 1 : i - 1));
+  }, [displayItems.length]);
 
   const handleNext = useCallback(() => {
-    setIndex((i) => (i >= items.length - 1 ? 0 : i + 1));
-  }, [items.length]);
+    setIndex((i) => (i >= displayItems.length - 1 ? 0 : i + 1));
+  }, [displayItems.length]);
+
+  useEffect(() => {
+    if (displayItems.length > 0 && index >= displayItems.length) {
+      setIndex(0);
+    }
+  }, [displayItems.length, index]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (items.length === 0) return;
+      if (displayItems.length === 0) return;
       if (e.key === 'ArrowLeft') {
         handlePrev();
         e.preventDefault();
@@ -153,9 +140,9 @@ export function TrainingPreview() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [items.length, handlePrev, handleNext]);
+  }, [displayItems.length, handlePrev, handleNext]);
 
-  if (loading) {
+  if (loading && displayItems.length === 0) {
     return (
       <div className="extract-config-training-preview">
         <p className="extract-config-preview-loading">Loading preview…</p>
@@ -163,11 +150,11 @@ export function TrainingPreview() {
     );
   }
 
-  if (error || items.length === 0) {
+  if (error || displayItems.length === 0) {
     return (
       <div className="extract-config-training-preview">
         <p className="extract-config-preview-empty" style={{ whiteSpace: 'pre-wrap' }}>
-          {error ?? 'No test set or no model. Run training first.'}
+          {error ?? 'Run training to see preview.'}
         </p>
       </div>
     );
@@ -178,11 +165,6 @@ export function TrainingPreview() {
 
   return (
     <div className="extract-config-training-preview">
-      {modelFormat != null && (
-        <p className="extract-config-preview-format" role="status">
-          Model format: {modelFormat}
-        </p>
-      )}
       <div className="extract-config-preview-nav">
         <button
           type="button"
@@ -193,7 +175,7 @@ export function TrainingPreview() {
           Previous
         </button>
         <span className="extract-config-preview-index">
-          {index + 1} / {items.length}
+          {safeIndex + 1} / {displayItems.length}
         </span>
         <button
           type="button"
@@ -219,7 +201,7 @@ export function TrainingPreview() {
         )}
         <img
           src={getScreenshotUrl(item.filename, item.subdir)}
-          alt={`Test sample ${index + 1}`}
+          alt={`Test sample ${safeIndex + 1}`}
           className="extract-config-preview-image"
           style={{
             width: displayWidth || undefined,

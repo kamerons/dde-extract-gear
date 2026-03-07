@@ -59,6 +59,12 @@ class Config:
         "BOX_DETECTOR_MODEL_PATH", "data/box_detector_model"
     )
     TRAINING_EPOCHS: int = max(1, int(os.getenv("TRAINING_EPOCHS", "50")))
+    PREVIEW_EVERY_N_EPOCHS: int = max(
+        1, min(int(os.getenv("PREVIEW_EVERY_N_EPOCHS", "20")), 1000)
+    )
+    PREVIEW_EXPECTED_DURATION_MS: int = max(
+        0, int(os.getenv("PREVIEW_EXPECTED_DURATION_MS", "10000"))
+    )
 
     @property
     def redis_url(self) -> str:

@@ -1,0 +1,20 @@
+---
+description: Markdown files must use only ASCII; use Unicode escapes for special characters
+globs: "**/*.md"
+alwaysApply: false
+---
+
+# Markdown: ASCII only
+
+Never create or edit Markdown (`.md`) files with non-ASCII characters.
+
+- Use only ASCII (code points 0x00--0x7F) in `.md` file content.
+- If a special character is needed (e.g. a symbol, smart quote, or arrow), use the **Unicode escape sequence** instead of the literal character.
+
+Examples:
+
+- Right arrow: write `\u2192` or `U+2192` (or use ASCII `->`) instead of the Unicode arrow character.
+- Right single quotation mark (apostrophe): write `\u2019` or `U+2019` (or use ASCII `'`) instead of the curly apostrophe.
+- Left/right double quotation marks: use ASCII `"` or document the escape (e.g. `\u201C`, `\u201D`) instead of typing the curly quotes.
+
+This keeps Markdown files easy to search, diff, and edit in any environment, and avoids tooling issues with literal non-ASCII characters.

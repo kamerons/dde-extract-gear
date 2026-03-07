@@ -21,6 +21,7 @@ class TaskService:
     TRAINING_QUEUE_KEY = "training_tasks"
     TRAINING_CURRENT_TASK_KEY = "training_current_task_id"
     EVALUATION_QUEUE_KEY = "evaluation_tasks"
+    LATEST_PREVIEW_KEY = "extract:training:latest_preview"
 
     def __init__(self):
         """Initialize task service with Redis connection."""
@@ -238,6 +239,24 @@ class TaskService:
             except json.JSONDecodeError:
                 pass
 
+        # Latest preview (written by worker's eval loop or on training completion)
+        preview_data = self.redis_client.get(f"task:{task_id}:latest_preview")
+        if preview_data is not None:
+            try:
+                response["latest_preview"] = json.loads(preview_data)
+            except json.JSONDecodeError:
+                pass
+
+        # Expected preview duration in ms (worker sets from test_sources count * PREVIEW_MS_PER_IMAGE)
+        expected_duration_str = self.redis_client.get(
+            f"task:{task_id}:preview_expected_duration_ms"
+        )
+        if expected_duration_str is not None:
+            try:
+                response["preview_expected_duration_ms"] = int(expected_duration_str)
+            except (ValueError, TypeError):
+                pass
+
         # Model format (.keras vs HDF5) when task loaded a box detector model (e.g. evaluation)
         model_format = self.redis_client.get(f"task:{task_id}:model_format")
         if model_format is not None:
@@ -290,3 +309,26 @@ class TaskService:
             )
 
         logger.info(f"Updated task {task_id} to status {status}")
+
+    def get_latest_preview(self) -> Optional[Dict[str, Any]]:
+        """
+        Get the latest training preview (items, scale_regular, scale_blueprint)
+        written by the worker's eval loop or on training completion.
+        Returns None if no preview is available.
+        Tries global key first, then current training task's latest_preview.
+        """
+        data = self.redis_client.get(self.LATEST_PREVIEW_KEY)
+        if data is not None:
+            try:
+                return json.loads(data)
+            except json.JSONDecodeError:
+                pass
+        current_id = self.redis_client.get(self.TRAINING_CURRENT_TASK_KEY)
+        if current_id:
+            task_preview = self.redis_client.get(f"task:{current_id}:latest_preview")
+            if task_preview is not None:
+                try:
+                    return json.loads(task_preview)
+                except json.JSONDecodeError:
+                    pass
+        return None

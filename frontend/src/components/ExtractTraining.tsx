@@ -3,13 +3,18 @@ import {
   startTraining,
   stopTraining,
   getTrainingTaskStatus,
+  getExtractConfig,
   type TrainingTaskStatus,
   type EvaluateResponse,
+  type TrainingPreviewResponse,
+  type ExtractConfigResponse,
 } from '../api/extract';
 import { OriginScaleEditor } from './OriginScaleEditor';
 import { TrainingPreview } from './TrainingPreview';
 
 const TRAINING_POLL_INTERVAL_MS = 2000;
+const DEFAULT_PREVIEW_EVERY_N_EPOCHS = 20;
+const DEFAULT_PREVIEW_EXPECTED_DURATION_MS = 10000;
 const EVAL_COUNTDOWN_SIZE = 56;
 const EVAL_COUNTDOWN_STROKE = 4;
 const EVAL_COUNTDOWN_R = (EVAL_COUNTDOWN_SIZE - EVAL_COUNTDOWN_STROKE) / 2;
@@ -48,8 +53,6 @@ function EvalCountdownCircle({ progress }: { progress: number }) {
   );
 }
 
-const EVAL_COUNTDOWN_DURATION_MS = 10000;
-
 type ModelSubTab = 'box_detector' | 'type' | 'digit';
 
 function evalResponseKey(e: EvaluateResponse): string {
@@ -58,23 +61,35 @@ function evalResponseKey(e: EvaluateResponse): string {
 
 export function ExtractTraining() {
   const [modelSubTab, setModelSubTab] = useState<ModelSubTab>('box_detector');
+  const [extractConfig, setExtractConfig] = useState<ExtractConfigResponse | null>(null);
   const [trainingTaskId, setTrainingTaskId] = useState<string | null>(null);
   const [trainingStatus, setTrainingStatus] = useState<TrainingTaskStatus['status'] | null>(null);
   const [trainingProgress, setTrainingProgress] = useState<{ evaluated: number; total_planned: number } | null>(null);
   const [trainingResults, setTrainingResults] = useState<Record<string, number | string> | null>(null);
   const [trainingError, setTrainingError] = useState<string | null>(null);
   const [latestEval, setLatestEval] = useState<EvaluateResponse | null>(null);
-  const [evalCountdownStart, setEvalCountdownStart] = useState<number | null>(null);
-  const [evalCountdownProgress, setEvalCountdownProgress] = useState(0);
+  const [latestPreview, setLatestPreview] = useState<TrainingPreviewResponse | null>(null);
+  const [previewWaitStart, setPreviewWaitStart] = useState<number | null>(null);
+  const [circleProgress, setCircleProgress] = useState(0);
   const trainingPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const prevEvalKeyRef = useRef<string | null>(null);
+  const lastEpochWithPreviewRef = useRef<number>(-1);
+  const previewWaitStartRef = useRef<number | null>(null);
+  const taskPreviewExpectedDurationMsRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    getExtractConfig().then(setExtractConfig).catch(() => {});
+  }, []);
 
   const handleStartTraining = useCallback(async () => {
     setTrainingError(null);
     setTrainingResults(null);
     setLatestEval(null);
-    setEvalCountdownStart(null);
+    setLatestPreview(null);
+    setPreviewWaitStart(null);
     prevEvalKeyRef.current = null;
+    lastEpochWithPreviewRef.current = -1;
+    taskPreviewExpectedDurationMsRef.current = null;
     try {
       const { task_id } = await startTraining();
       setTrainingTaskId(task_id);
@@ -94,6 +109,8 @@ export function ExtractTraining() {
     }
   }, []);
 
+  const previewEveryN = extractConfig?.preview_every_n_epochs ?? DEFAULT_PREVIEW_EVERY_N_EPOCHS;
+
   useEffect(() => {
     if (!trainingTaskId || (trainingStatus !== 'pending' && trainingStatus !== 'processing')) return;
     const taskId = trainingTaskId;
@@ -102,14 +119,38 @@ export function ExtractTraining() {
         const res = await getTrainingTaskStatus(taskId);
         setTrainingStatus(res.status);
         if (res.progress) setTrainingProgress(res.progress);
-        if (res.results) setTrainingResults(res.results);
+        if (res.results) setTrainingResults(res.results as Record<string, number | string>);
         if (res.latest_eval != null) {
           const key = evalResponseKey(res.latest_eval);
           if (prevEvalKeyRef.current !== key) {
             prevEvalKeyRef.current = key;
             setLatestEval(res.latest_eval);
-            setEvalCountdownStart(Date.now());
           }
+        }
+        const evaluated = res.progress?.evaluated ?? 0;
+        const atPreviewEpoch = evaluated > 0 && evaluated % previewEveryN === 0;
+        if (res.latest_preview != null && res.latest_preview.items?.length) {
+          if (atPreviewEpoch && lastEpochWithPreviewRef.current < evaluated) {
+            const waitStart = previewWaitStartRef.current;
+            if (typeof waitStart === 'number') {
+              const elapsed = Date.now() - waitStart;
+              console.info(`[ExtractTraining] Preview received in ${elapsed} ms`);
+            }
+            lastEpochWithPreviewRef.current = evaluated;
+            previewWaitStartRef.current = null;
+            setPreviewWaitStart(null);
+          }
+          setLatestPreview(res.latest_preview);
+        }
+        if (atPreviewEpoch && lastEpochWithPreviewRef.current < evaluated) {
+          const now = Date.now();
+          if (previewWaitStartRef.current == null) {
+            previewWaitStartRef.current = now;
+            setPreviewWaitStart(now);
+          }
+        }
+        if (res.preview_expected_duration_ms != null) {
+          taskPreviewExpectedDurationMsRef.current = res.preview_expected_duration_ms;
         }
         if (res.error) setTrainingError(res.error);
         if (res.status === 'completed' || res.status === 'failed' || res.status === 'cancelled' || res.status === 'not_found') {
@@ -126,18 +167,36 @@ export function ExtractTraining() {
       clearInterval(id);
       trainingPollRef.current = null;
     };
-  }, [trainingTaskId, trainingStatus]);
+  }, [trainingTaskId, trainingStatus, previewEveryN]);
 
   useEffect(() => {
-    if (trainingStatus !== 'processing' || latestEval == null || evalCountdownStart == null) return;
-    const tick = () => {
-      const elapsed = Date.now() - evalCountdownStart;
-      setEvalCountdownProgress(Math.min(1, elapsed / EVAL_COUNTDOWN_DURATION_MS));
-    };
-    tick();
-    const id = setInterval(tick, 100);
-    return () => clearInterval(id);
-  }, [trainingStatus, latestEval, evalCountdownStart]);
+    if (trainingStatus !== 'processing' || !trainingProgress) {
+      setCircleProgress(0);
+      return;
+    }
+    const N = previewEveryN;
+    const evaluated = trainingProgress.evaluated;
+    const epochInCycle = evaluated % N;
+    const epochProgress = N > 0 ? epochInCycle / N : 0;
+    const waiting = evaluated > 0 && evaluated % N === 0 && lastEpochWithPreviewRef.current < evaluated;
+
+    if (waiting && previewWaitStart != null) {
+      const tick = () => {
+        const expectedMs =
+          taskPreviewExpectedDurationMsRef.current ??
+          extractConfig?.preview_expected_duration_ms ??
+          DEFAULT_PREVIEW_EXPECTED_DURATION_MS;
+        const elapsed = Date.now() - previewWaitStart;
+        const waitProgress = Math.min(1, elapsed / expectedMs);
+        setCircleProgress(0.8 + 0.2 * waitProgress);
+      };
+      tick();
+      const id = setInterval(tick, 100);
+      return () => clearInterval(id);
+    }
+    setCircleProgress(0.8 * epochProgress);
+    return undefined;
+  }, [trainingStatus, trainingProgress, previewEveryN, extractConfig?.preview_expected_duration_ms, previewWaitStart]);
 
   return (
     <div className="configuration-container extract-config extract-config--training-page">
@@ -252,7 +311,7 @@ export function ExtractTraining() {
             <div className="extract-config-evaluate-results" role="status">
               <div className="extract-config-evaluate-results-header">
                 <p className="stat-section-label">Test set</p>
-                <EvalCountdownCircle progress={evalCountdownProgress} />
+                <EvalCountdownCircle progress={circleProgress} />
               </div>
               <ul>
                 <li>Test MAE X: {latestEval.test_mae_x.toFixed(4)}</li>
@@ -262,7 +321,7 @@ export function ExtractTraining() {
             </div>
           )}
           {modelSubTab === 'box_detector' && (
-            <TrainingPreview />
+            <TrainingPreview latestPreview={latestPreview} />
           )}
         </div>
       </div>

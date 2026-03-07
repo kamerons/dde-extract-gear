@@ -72,20 +72,13 @@ def _box_detector_load_path() -> tuple[Path | None, Path, str]:
     if legacy_path.exists():
         return (legacy_path, model_dir, stem)
 
-    # Log why we found nothing so logs show what the API actually sees
     try:
-        exists = model_dir.exists()
-        listing = list(model_dir.iterdir()) if exists else []
-        logger.warning(
-            "Box detector model not found: model_dir=%s (exists=%s), stem=%s, files=%s. "
-            "Check DATA_DIR, BOX_DETECTOR_MODEL_PATH, and that the API has the same data volume as the worker.",
-            model_dir, exists, stem, [p.name for p in listing[:20]],
-        )
+        if not model_dir.exists():
+            logger.warning("Box detector model not found: model_dir=%s (missing), stem=%s", model_dir, stem)
+        else:
+            logger.warning("Box detector model not found: model_dir=%s, stem=%s", model_dir, stem)
     except OSError as e:
-        logger.warning(
-            "Box detector model not found: model_dir=%s, stem=%s; listdir failed: %s",
-            model_dir, stem, e,
-        )
+        logger.warning("Box detector model not found: model_dir=%s, stem=%s; %s", model_dir, stem, e)
     return (None, model_dir, stem)
 
 
@@ -96,22 +89,6 @@ def _box_detector_not_found_detail(model_dir: Path, stem: str) -> str:
         f"{stem}_current.keras, {stem}_<timestamp>.keras, or {stem}.keras. "
         "Run training first or check DATA_DIR and BOX_DETECTOR_MODEL_PATH (and volume mount if using Docker)."
     )
-
-
-def _box_detector_404_debug(model_dir: Path, stem: str) -> dict:
-    """Debug info to include in 404 response so the client can see what the API saw."""
-    current_path = model_dir / (stem + "_current.keras")
-    try:
-        listing = sorted(p.name for p in model_dir.iterdir()) if model_dir.exists() else []
-    except OSError as e:
-        listing = [f"listdir error: {e}"]
-    return {
-        "model_dir": str(model_dir),
-        "stem": stem,
-        "model_dir_exists": model_dir.exists(),
-        "current_exists": current_path.exists(),
-        "listing": listing,
-    }
 
 
 def _screenshot_path(filename: str, subdir: str = "unlabeled/screenshots") -> Path:
@@ -157,33 +134,8 @@ async def get_extract_config():
         "augment_shift_regular": config.EXTRACT_AUGMENT_SHIFT_REGULAR,
         "augment_shift_blueprint": config.EXTRACT_AUGMENT_SHIFT_BLUEPRINT,
         "augment_fill": config.EXTRACT_AUGMENT_FILL,
-    }
-
-
-@router.get("/api/extract/training/model-debug")
-async def training_model_debug():
-    """
-    Return resolved box-detector paths and config as seen by this process.
-    Use to debug 404s when models exist on disk (e.g. volume vs config).
-    """
-    load_path, model_dir, stem = _box_detector_load_path()
-    current_path = model_dir / (stem + "_current.keras")
-    legacy_path = model_dir / (stem + ".keras")
-    try:
-        listing = [p.name for p in model_dir.iterdir()] if model_dir.exists() else []
-    except OSError as e:
-        listing = [f"error: {e}"]
-    return {
-        "DATA_DIR": config.DATA_DIR,
-        "BOX_DETECTOR_MODEL_PATH": config.BOX_DETECTOR_MODEL_PATH,
-        "model_dir": str(model_dir),
-        "stem": stem,
-        "current_path": str(current_path),
-        "current_exists": current_path.exists(),
-        "legacy_path": str(legacy_path),
-        "legacy_exists": legacy_path.exists(),
-        "listing": sorted(listing),
-        "load_path": str(load_path) if load_path else None,
+        "preview_every_n_epochs": config.PREVIEW_EVERY_N_EPOCHS,
+        "preview_expected_duration_ms": config.PREVIEW_EXPECTED_DURATION_MS,
     }
 
 
@@ -325,6 +277,16 @@ async def training_evaluate_start():
         logger.exception("Failed to create evaluation task")
         raise HTTPException(status_code=500, detail=str(e)) from e
     return {"task_id": task_id, "status": "pending"}
+
+
+@router.get("/api/extract/training/preview/latest")
+async def training_preview_latest():
+    """
+    Return the latest training preview (items, scale_regular, scale_blueprint)
+    written automatically during training or on completion. Returns null when no preview is available yet.
+    """
+    preview = task_service.get_latest_preview()
+    return preview if preview is not None else None
 
 
 @router.post("/api/extract/training/preview")

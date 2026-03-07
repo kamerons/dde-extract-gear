@@ -80,6 +80,50 @@ def _load_box_detector_model(load_path: Path) -> tuple[Any, str]:
         tmp_path.unlink(missing_ok=True)
 
 
+def build_preview_items(
+    model: Any,
+    test_sources: list,
+    scale_regular: float,
+    scale_blueprint: float,
+    shift_regular: float,
+    shift_blueprint: float,
+    fill_mode: str,
+    augment_count: int,
+) -> tuple[list[dict], float, float]:
+    """
+    Build preview items from an already-loaded model and test sources.
+    Returns (items, scale_regular, scale_blueprint). Items have filename, subdir, origin_x, origin_y, pred_x, pred_y.
+    """
+    X_test, _ = _build_arrays(
+        test_sources,
+        augment=False,
+        shift_regular=shift_regular,
+        shift_blueprint=shift_blueprint,
+        fill_mode=fill_mode,
+        augment_count=augment_count,
+    )
+    pred = model.predict(X_test, verbose=0)
+
+    items = []
+    for i, (typename, filename, png_path, ox, oy) in enumerate(test_sources):
+        img = _load_image(png_path)
+        w, h = img.size
+        scale_x = INPUT_WIDTH / w
+        scale_y = INPUT_HEIGHT / h
+        pred_x = int(round(float(pred[i, 0]) / scale_x))
+        pred_y = int(round(float(pred[i, 1]) / scale_y))
+        subdir = f"labeled/screenshots/{typename}"
+        items.append({
+            "filename": filename,
+            "subdir": subdir,
+            "origin_x": ox,
+            "origin_y": oy,
+            "pred_x": pred_x,
+            "pred_y": pred_y,
+        })
+    return (items, scale_regular, scale_blueprint)
+
+
 def run_evaluate(
     data_dir: Path,
     test_ratio: float,
@@ -177,37 +221,19 @@ def run_preview(
             "message": f"Keras failed to load model: {e!s}",
         }
 
-    X_test, _ = _build_arrays(
+    items, sr, sb = build_preview_items(
+        model,
         test_sources,
-        augment=False,
-        shift_regular=shift_regular,
-        shift_blueprint=shift_blueprint,
-        fill_mode=fill_mode,
-        augment_count=augment_count,
+        scale_regular,
+        scale_blueprint,
+        shift_regular,
+        shift_blueprint,
+        fill_mode,
+        augment_count,
     )
-    pred = model.predict(X_test, verbose=0)
-
-    items = []
-    for i, (typename, filename, png_path, ox, oy) in enumerate(test_sources):
-        img = _load_image(png_path)
-        w, h = img.size
-        scale_x = INPUT_WIDTH / w
-        scale_y = INPUT_HEIGHT / h
-        pred_x = int(round(float(pred[i, 0]) / scale_x))
-        pred_y = int(round(float(pred[i, 1]) / scale_y))
-        subdir = f"labeled/screenshots/{typename}"
-        items.append({
-            "filename": filename,
-            "subdir": subdir,
-            "origin_x": ox,
-            "origin_y": oy,
-            "pred_x": pred_x,
-            "pred_y": pred_y,
-        })
-
     return {
         "items": items,
-        "scale_regular": scale_regular,
-        "scale_blueprint": scale_blueprint,
+        "scale_regular": sr,
+        "scale_blueprint": sb,
         "model_format": format_str,
     }

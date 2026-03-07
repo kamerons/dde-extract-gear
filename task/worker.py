@@ -22,6 +22,7 @@ from task.processors.box_detector_processor import (
 )
 from task.processors.evaluation_processor import (
     _load_box_detector_model as load_box_detector_with_format,
+    build_preview_items,
     run_evaluate as eval_run_evaluate,
     run_preview as eval_run_preview,
 )
@@ -29,6 +30,8 @@ from shared.recommendation_engine import TaskCancelledError
 
 EVAL_INTERVAL_SEC = 10
 EVAL_THREAD_JOIN_TIMEOUT_SEC = 15
+LATEST_PREVIEW_KEY = "extract:training:latest_preview"
+PREVIEW_TTL = 3600
 
 # Configure logging
 logging.basicConfig(
@@ -207,6 +210,51 @@ class TaskWorker:
                     3600,
                     json.dumps(metrics),
                 )
+                # Only write preview when we've reached a multiple of PREVIEW_EVERY_N_EPOCHS
+                evaluated_str = self.redis_client.hget(f"task:{task_id}:meta", "evaluated")
+                try:
+                    evaluated = int(evaluated_str) if evaluated_str else 0
+                except (ValueError, TypeError):
+                    evaluated = 0
+                last_preview_str = self.redis_client.get(f"task:{task_id}:last_preview_epoch")
+                last_preview_epoch = int(last_preview_str) if last_preview_str else -1
+                preview_interval = config.PREVIEW_EVERY_N_EPOCHS
+                if (
+                    evaluated > 0
+                    and evaluated % preview_interval == 0
+                    and evaluated != last_preview_epoch
+                ):
+                    try:
+                        expected_ms = len(test_sources) * config.PREVIEW_MS_PER_IMAGE
+                        self.redis_client.setex(
+                            f"task:{task_id}:preview_expected_duration_ms",
+                            PREVIEW_TTL,
+                            str(expected_ms),
+                        )
+                        t0 = time.perf_counter()
+                        items, sr, sb = build_preview_items(
+                            model,
+                            test_sources,
+                            config.EXTRACT_REGULAR_SCALE,
+                            config.EXTRACT_BLUEPRINT_SCALE,
+                            config.EXTRACT_AUGMENT_SHIFT_REGULAR,
+                            config.EXTRACT_AUGMENT_SHIFT_BLUEPRINT,
+                            config.EXTRACT_AUGMENT_FILL,
+                            config.EXTRACT_AUGMENT_COUNT,
+                        )
+                        elapsed_ms = int((time.perf_counter() - t0) * 1000)
+                        preview_payload = {"items": items, "scale_regular": sr, "scale_blueprint": sb}
+                        preview_json = json.dumps(preview_payload)
+                        self.redis_client.setex(f"task:{task_id}:latest_preview", PREVIEW_TTL, preview_json)
+                        self.redis_client.setex(LATEST_PREVIEW_KEY, PREVIEW_TTL, preview_json)
+                        self.redis_client.setex(f"task:{task_id}:last_preview_epoch", PREVIEW_TTL, str(evaluated))
+                        logger.info(
+                            "Preview generated in %d ms (%d items)",
+                            elapsed_ms,
+                            len(items),
+                        )
+                    except Exception as pe:
+                        logger.warning("Eval thread preview failed: %s", pe)
             except Exception as e:
                 logger.debug("Eval thread skip: %s", e)
 
@@ -273,6 +321,40 @@ class TaskWorker:
                     error=results.get("message", results.get("error", "Unknown error"))
                 )
                 return
+
+            data_dir = repo_root / self.config.DATA_DIR
+            logger.info("Running completion preview (data_dir=%s)", data_dir)
+            t0 = time.perf_counter()
+            preview_result = eval_run_preview(
+                data_dir,
+                self.config.BOX_DETECTOR_TEST_RATIO,
+                self.config.EXTRACT_AUGMENT_SHIFT_REGULAR,
+                self.config.EXTRACT_AUGMENT_SHIFT_BLUEPRINT,
+                self.config.EXTRACT_AUGMENT_FILL,
+                self.config.EXTRACT_AUGMENT_COUNT,
+                self.config.EXTRACT_REGULAR_SCALE,
+                self.config.EXTRACT_BLUEPRINT_SCALE,
+            )
+            elapsed_ms = int((time.perf_counter() - t0) * 1000)
+            if "error" not in preview_result:
+                preview_payload = {
+                    "items": preview_result["items"],
+                    "scale_regular": preview_result["scale_regular"],
+                    "scale_blueprint": preview_result["scale_blueprint"],
+                }
+                preview_json = json.dumps(preview_payload)
+                self.redis_client.setex(f"task:{task_id}:latest_preview", PREVIEW_TTL, preview_json)
+                self.redis_client.setex(LATEST_PREVIEW_KEY, PREVIEW_TTL, preview_json)
+                logger.info(
+                    "Completion preview generated in %d ms (%d items)",
+                    elapsed_ms,
+                    len(preview_result["items"]),
+                )
+            else:
+                logger.warning(
+                    "Completion preview not written: %s",
+                    preview_result.get("message", preview_result.get("error", "unknown")),
+                )
 
             self._clear_current_task(self.TRAINING_CURRENT_TASK_KEY)
             self.update_task_status(task_id, "completed", results=results)

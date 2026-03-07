@@ -300,12 +300,14 @@ class BoxDetectorProcessor:
             if progress_callback:
                 progress_callback(epoch, self.epochs, metrics)
 
-            # Save current checkpoint so background eval thread can load it every 10s
-            current_path = save_dir / (stem + "_current.keras")
-            logger.info("Saving checkpoint to %s", current_path)
-            _save_model_native(model, current_path)
-            if not current_path.exists():
-                logger.warning("Checkpoint file missing after save: %s", current_path)
+            # Save checkpoint every 10 epochs (and on last epoch) so eval thread can load it
+            save_checkpoint = (epoch % 10 == 0) or (epoch == self.epochs)
+            if save_checkpoint:
+                current_path = save_dir / (stem + "_current.keras")
+                logger.info("Saving checkpoint to %s", current_path)
+                _save_model_native(model, current_path)
+                if not current_path.exists():
+                    logger.warning("Checkpoint file missing after save: %s", current_path)
 
             if check_cancelled and check_cancelled():
                 raise TaskCancelledError()

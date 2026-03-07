@@ -30,6 +30,8 @@ export interface ExtractConfigResponse {
   augment_shift_regular: number;
   augment_shift_blueprint: number;
   augment_fill: string;
+  preview_every_n_epochs: number;
+  preview_expected_duration_ms: number;
 }
 
 /**
@@ -149,6 +151,9 @@ export interface TrainingTaskStatus {
   progress?: { evaluated: number; total_planned: number };
   results?: Record<string, unknown>;
   latest_eval?: EvaluateResponse;
+  latest_preview?: TrainingPreviewResponse;
+  /** Expected duration in ms for next preview (test set size * ms per image). */
+  preview_expected_duration_ms?: number;
   error?: string;
   model_format?: string;
 }
@@ -230,6 +235,26 @@ export interface TrainingPreviewResponse {
   items: TrainingPreviewItem[];
   scale_regular: number;
   scale_blueprint: number;
+}
+
+/**
+ * Get the latest training preview (written automatically during training or on completion).
+ * Returns null when no preview is available yet.
+ */
+export async function getLatestPreview(): Promise<TrainingPreviewResponse | null> {
+  const response = await fetch(`${API_BASE_URL}/api/extract/training/preview/latest`);
+  if (!response.ok) {
+    throw new Error(`Failed to get latest preview: ${response.status}`);
+  }
+  const data = await response.json();
+  if (data == null || !data.items || !Array.isArray(data.items)) {
+    return null;
+  }
+  return {
+    items: data.items,
+    scale_regular: Number(data.scale_regular) || 1,
+    scale_blueprint: Number(data.scale_blueprint) || 1,
+  };
 }
 
 /**
