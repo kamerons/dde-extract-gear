@@ -1,11 +1,14 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   listScreenshots,
   getScreenshotUrl,
   fetchBoxes,
+  getExtractConfig,
+  saveOrigin,
   EXTRACT_SUBDIRS,
   type ImageType,
   type ExtractBox,
+  type ExtractConfigResponse,
 } from '../api/extract';
 
 const DISPLAY_SCALE = 0.5;
@@ -21,6 +24,13 @@ export function ExtractConfig() {
   const [boxes, setBoxes] = useState<ExtractBox[]>([]);
   const [boxesError, setBoxesError] = useState<string | null>(null);
   const [imageNaturalSize, setImageNaturalSize] = useState<{ width: number; height: number } | null>(null);
+  const [extractConfig, setExtractConfig] = useState<ExtractConfigResponse | null>(null);
+  const [saveStatus, setSaveStatus] = useState<'success' | 'error' | null>(null);
+  const [saveErrorMessage, setSaveErrorMessage] = useState<string | null>(null);
+  const [previewAugment, setPreviewAugment] = useState<boolean>(false);
+  const imageRef = useRef<HTMLImageElement | null>(null);
+  const previewCanvasPosRef = useRef<HTMLCanvasElement | null>(null);
+  const previewCanvasNegRef = useRef<HTMLCanvasElement | null>(null);
 
   const currentScale = imageType === 'blueprint' ? blueprintScale : regularScale;
 
@@ -49,6 +59,12 @@ export function ExtractConfig() {
   }, [loadScreenshots]);
 
   useEffect(() => {
+    getExtractConfig()
+      .then(setExtractConfig)
+      .catch((e) => console.error('Failed to fetch extract config', e));
+  }, []);
+
+  useEffect(() => {
     if (!selectedFilename) {
       setBoxes([]);
       setBoxesError(null);
@@ -71,6 +87,46 @@ export function ExtractConfig() {
     };
   }, [originX, originY, currentScale, imageType, selectedFilename]);
 
+  // Draw augmentation preview (positive and negative shift) when toggle is on and image is loaded
+  useEffect(() => {
+    if (
+      !previewAugment ||
+      !imageRef.current?.complete ||
+      !extractConfig ||
+      !imageNaturalSize
+    ) {
+      return;
+    }
+    const img = imageRef.current;
+    const w = img.naturalWidth;
+    const h = img.naturalHeight;
+    const shiftFrac =
+      imageType === 'blueprint'
+        ? extractConfig.augment_shift_blueprint
+        : extractConfig.augment_shift_regular;
+    const maxPx = Math.max(1, Math.round(shiftFrac * Math.min(w, h)));
+
+    const drawShifted = (canvas: HTMLCanvasElement | null, dx: number, dy: number) => {
+      if (!canvas) return;
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.fillStyle = 'black';
+      ctx.fillRect(0, 0, w, h);
+      ctx.drawImage(img, dx, dy);
+    };
+
+    drawShifted(previewCanvasPosRef.current, maxPx, maxPx);
+    drawShifted(previewCanvasNegRef.current, -maxPx, -maxPx);
+  }, [
+    previewAugment,
+    imageType,
+    extractConfig,
+    imageNaturalSize,
+    selectedFilename,
+  ]);
+
   const handleImageClick = (e: React.MouseEvent<HTMLDivElement>) => {
     const target = e.currentTarget;
     const rect = target.getBoundingClientRect();
@@ -89,6 +145,25 @@ export function ExtractConfig() {
 
   const screenshotSubdir =
     imageType === 'blueprint' ? EXTRACT_SUBDIRS.blueprint : EXTRACT_SUBDIRS.regular;
+
+  const handleSaveOrigin = useCallback(async () => {
+    if (!selectedFilename || !screenshotSubdir) return;
+    setSaveStatus(null);
+    setSaveErrorMessage(null);
+    try {
+      await saveOrigin(selectedFilename, screenshotSubdir, originX, originY);
+      setSaveStatus('success');
+    } catch (e) {
+      setSaveStatus('error');
+      setSaveErrorMessage(e instanceof Error ? e.message : 'Failed to save origin');
+    }
+  }, [selectedFilename, screenshotSubdir, originX, originY]);
+
+  const isLabeledSubdir =
+    screenshotSubdir === EXTRACT_SUBDIRS.regular ||
+    screenshotSubdir === EXTRACT_SUBDIRS.blueprint;
+  const canSaveOrigin = isLabeledSubdir && selectedFilename != null;
+
   const imageUrl = selectedFilename
     ? getScreenshotUrl(selectedFilename, screenshotSubdir)
     : null;
@@ -180,6 +255,27 @@ export function ExtractConfig() {
               />
             </label>
           </div>
+          {canSaveOrigin && (
+            <div className="extract-config-save-row">
+              <button
+                type="button"
+                className="extract-config-save-button"
+                onClick={handleSaveOrigin}
+              >
+                Save origin
+              </button>
+              {saveStatus === 'success' && (
+                <span className="extract-config-save-ok" role="status">
+                  Saved
+                </span>
+              )}
+              {saveStatus === 'error' && (
+                <span className="configuration-error" role="alert">
+                  {saveErrorMessage ?? 'Failed to save'}
+                </span>
+              )}
+            </div>
+          )}
           {boxesError && (
             <p className="configuration-error" role="alert">
               {boxesError}
@@ -202,6 +298,7 @@ export function ExtractConfig() {
                 aria-label="Click to set top-left corner of armor tab"
               >
                 <img
+                  ref={imageRef}
                   src={imageUrl}
                   alt="Screenshot"
                   className="extract-config-image"
@@ -250,18 +347,95 @@ export function ExtractConfig() {
               </p>
             )}
           </div>
+
+          {extractConfig && (
+            <div className="extract-config-augment-section">
+              <label className="extract-config-preview-toggle">
+                <input
+                  type="checkbox"
+                  checked={previewAugment}
+                  onChange={(e) => setPreviewAugment(e.target.checked)}
+                />
+                Preview augmentation
+              </label>
+              <p className="stat-section-description">
+                Shows how the current shift level ({imageType === 'blueprint'
+                  ? extractConfig.augment_shift_blueprint
+                  : extractConfig.augment_shift_regular}{' '}
+                for {imageType}) will affect this image (positive and negative shift). Uses black fill.
+              </p>
+              {previewAugment && imageNaturalSize && (
+                <div className="extract-config-preview-grid">
+                  <div className="extract-config-preview-cell">
+                    <p className="extract-config-preview-label">Negative shift (−max)</p>
+                    <div
+                      className="extract-config-preview-wrapper"
+                      style={{
+                        width: displayWidth || 'auto',
+                        height: displayHeight || 'auto',
+                      }}
+                    >
+                      <canvas
+                        ref={previewCanvasNegRef}
+                        width={imageNaturalSize.width}
+                        height={imageNaturalSize.height}
+                        style={{
+                          width: displayWidth || undefined,
+                          height: displayHeight || undefined,
+                          display: 'block',
+                        }}
+                        aria-label="Augmentation preview, negative shift"
+                      />
+                    </div>
+                  </div>
+                  <div className="extract-config-preview-cell">
+                    <p className="extract-config-preview-label">Positive shift (+max)</p>
+                    <div
+                      className="extract-config-preview-wrapper"
+                      style={{
+                        width: displayWidth || 'auto',
+                        height: displayHeight || 'auto',
+                      }}
+                    >
+                      <canvas
+                        ref={previewCanvasPosRef}
+                        width={imageNaturalSize.width}
+                        height={imageNaturalSize.height}
+                        style={{
+                          width: displayWidth || undefined,
+                          height: displayHeight || undefined,
+                          display: 'block',
+                        }}
+                        aria-label="Augmentation preview, positive shift"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="configuration-section extract-config-env">
           <p className="stat-section-label">Add these to your .env</p>
           <p className="stat-section-description">
-            Copy these lines into your .env file. Only the scale factors are stored; origin is
-            provided by the box detector at inference time.
+            Copy these lines into your .env file. Scale and augmentation shift are used by the
+            server and the augmentation script; origin is saved per image via Save origin.
           </p>
           <pre className="extract-config-env-block">
-            EXTRACT_REGULAR_SCALE={regularScale}
+            EXTRACT_REGULAR_SCALE={extractConfig?.regular_scale ?? regularScale}
             {'\n'}
-            EXTRACT_BLUEPRINT_SCALE={blueprintScale}
+            EXTRACT_BLUEPRINT_SCALE={extractConfig?.blueprint_scale ?? blueprintScale}
+            {extractConfig != null && (
+              <>
+                {'\n'}
+                EXTRACT_AUGMENT_SHIFT_REGULAR={extractConfig.augment_shift_regular}
+                {'\n'}
+                EXTRACT_AUGMENT_SHIFT_BLUEPRINT={extractConfig.augment_shift_blueprint}
+                {'\n'}
+                EXTRACT_AUGMENT_FILL={extractConfig.augment_fill}
+              </>
+            )}
           </pre>
         </div>
       </div>

@@ -4,6 +4,7 @@ env
 *.png
 *.json
 data/*model
+data/*.txt
 .vscode
 
 venv/

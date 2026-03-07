@@ -21,8 +21,15 @@ Ground-truth data used for training and evaluation.
 - **Images**: `data/labeled/screenshots/<type>/<id>.png`
   - `<type>` is **user-provided** when organizing or importing screenshots: `regular` (standard armor card) or `blueprint` (blueprint card). The neural network does not classify type; you assign it (e.g. by placing images in the corresponding folder).
   - Example: `data/labeled/screenshots/blueprint/031.png`, `data/labeled/screenshots/regular/001.png`.
-- **Box coordinates**: For each image, a companion text file with the same base name holds the **top-left** of the box.
-  - Example: `data/labeled/screenshots/blueprint/031.txt` contains the coordinates for the box in `031.png`.
+- **Box coordinates**: For each image, a companion text file with the same base name holds the **top-left** of the box (origin). Format: a single line with two integers, space-separated: `origin_x origin_y`.
+  - Example: `data/labeled/screenshots/blueprint/031.txt` contains the coordinates for the box in `031.png` (e.g. `423 293`).
+
+### Augmented screenshots (box detector training)
+
+- **Path**: `data/labeled/augmented/<type>/<id>_<n>.png` and `data/labeled/augmented/<type>/<id>_<n>.txt`
+  - `<type>` is `regular` or `blueprint`. Each file is a shifted variant of a source image from `data/labeled/screenshots/<type>/`.
+  - `<id>_<n>` is the base name (e.g. `001_1`, `001_2`) for the Nth augmented copy of source `<id>.png`. The `.txt` has the same format as above: one line `origin_x origin_y` for the box top-left in the augmented image.
+  - Example: `data/labeled/augmented/blueprint/031_1.png`, `data/labeled/augmented/blueprint/031_1.txt`.
 
 ### Numbers (digit / stat-value classifier)
 

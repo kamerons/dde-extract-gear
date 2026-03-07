@@ -24,3 +24,5 @@ pip install -r requirements-scripts.txt
 ```
 
 On Linux, if building `evdev` (a pynput dependency) fails, install kernel headers first, e.g. `apt-get install linux-headers-$(uname -r)`.
+
+For augmenting labeled screenshots (shift + fill) for box-detector training, see [AUGMENT.md](AUGMENT.md).

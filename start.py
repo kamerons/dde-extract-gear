@@ -60,6 +60,7 @@ def start_containers():
     print(f"  Base: {base_file}")
     print(f"  Dev:  {dev_file}")
     print("\n  API: http://localhost:8000  (hot-reload on)")
+    print("  Data: ./data is mounted writable (for Save origin, augmentation output, etc.)")
     print("  Redis: localhost:6379")
     print("  Frontend: disabled in dev — run 'npm run dev' in frontend/ for Vite HMR")
     print("  Stop with Ctrl+C, or run: python start.py stop\n")

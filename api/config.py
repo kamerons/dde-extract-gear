@@ -23,6 +23,26 @@ class Config:
     API_HOST: str = os.getenv("API_HOST", "0.0.0.0")
     API_PORT: int = int(os.getenv("API_PORT", "8000"))
 
+    # Extract pipeline: scale factors (float)
+    EXTRACT_REGULAR_SCALE: float = float(os.getenv("EXTRACT_REGULAR_SCALE", "1.0"))
+    EXTRACT_BLUEPRINT_SCALE: float = float(os.getenv("EXTRACT_BLUEPRINT_SCALE", "1.0"))
+
+    # Extract pipeline: augmentation (shift = fraction 0-1, fill = black | noise)
+    EXTRACT_AUGMENT_SHIFT_REGULAR: float = float(
+        os.getenv("EXTRACT_AUGMENT_SHIFT_REGULAR", "0.1")
+    )
+    EXTRACT_AUGMENT_SHIFT_BLUEPRINT: float = float(
+        os.getenv("EXTRACT_AUGMENT_SHIFT_BLUEPRINT", "0.1")
+    )
+    _augment_fill_raw: str = (
+        (os.getenv("EXTRACT_AUGMENT_FILL", "black") or "black").strip().lower()
+    )
+
+    @property
+    def EXTRACT_AUGMENT_FILL(self) -> str:
+        v = self._augment_fill_raw
+        return v if v in ("black", "noise") else "black"
+
     @property
     def redis_url(self) -> str:
         """Get Redis connection URL."""

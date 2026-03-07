@@ -24,6 +24,58 @@ export interface BoxesResponse {
   boxes: ExtractBox[];
 }
 
+export interface ExtractConfigResponse {
+  regular_scale: number;
+  blueprint_scale: number;
+  augment_shift_regular: number;
+  augment_shift_blueprint: number;
+  augment_fill: string;
+}
+
+/**
+ * Fetch extract pipeline config from the server (scale and augmentation from env).
+ */
+export async function getExtractConfig(): Promise<ExtractConfigResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/extract/config`);
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Failed to fetch extract config: ${response.status} ${text}`);
+  }
+  return response.json();
+}
+
+/**
+ * Save the box origin for the current screenshot to a .txt file next to the image.
+ */
+export async function saveOrigin(
+  filename: string,
+  subdir: string,
+  originX: number,
+  originY: number
+): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/api/extract/screenshots/save-origin`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      filename,
+      subdir,
+      origin_x: originX,
+      origin_y: originY,
+    }),
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    let message = text;
+    try {
+      const body = JSON.parse(text) as { detail?: string };
+      if (typeof body.detail === 'string') message = body.detail;
+    } catch {
+      message = `Failed to save origin: ${response.status} ${text}`;
+    }
+    throw new Error(message);
+  }
+}
+
 /**
  * List screenshot filenames in the given subdir.
  */

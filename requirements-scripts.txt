@@ -3,3 +3,4 @@
 # On Linux, pynput may require kernel headers: apt-get install linux-headers-$(uname -r)
 
 pynput>=0.7.6
+Pillow>=9.0.0

@@ -20,6 +20,14 @@ ALLOWED_SCREENSHOT_SUBDIRS = (
     "unlabeled/screenshots",
     "labeled/screenshots/regular",
     "labeled/screenshots/blueprint",
+    "labeled/augmented/regular",
+    "labeled/augmented/blueprint",
+)
+
+# Subdirs that allow saving origin (.txt) next to the screenshot
+LABELED_SCREENSHOT_SUBDIRS_WRITABLE = (
+    "labeled/screenshots/regular",
+    "labeled/screenshots/blueprint",
 )
 
 
@@ -51,6 +59,66 @@ class BoxesRequest(BaseModel):
     image_type: str  # "regular" | "blueprint"
 
 
+class SaveOriginRequest(BaseModel):
+    """Request body for POST /api/extract/screenshots/save-origin."""
+
+    filename: str
+    subdir: str  # labeled/screenshots/regular | labeled/screenshots/blueprint
+    origin_x: int
+    origin_y: int
+
+
+@router.get("/api/extract/config")
+async def get_extract_config():
+    """
+    Return extract pipeline config from env (scale and augmentation).
+    Used by the frontend for .env display and augmentation preview.
+    """
+    return {
+        "regular_scale": config.EXTRACT_REGULAR_SCALE,
+        "blueprint_scale": config.EXTRACT_BLUEPRINT_SCALE,
+        "augment_shift_regular": config.EXTRACT_AUGMENT_SHIFT_REGULAR,
+        "augment_shift_blueprint": config.EXTRACT_AUGMENT_SHIFT_BLUEPRINT,
+        "augment_fill": config.EXTRACT_AUGMENT_FILL,
+    }
+
+
+@router.post("/api/extract/screenshots/save-origin")
+async def save_origin(body: SaveOriginRequest):
+    """
+    Persist the box origin for a labeled screenshot. Writes a .txt file
+    next to the image with one line: origin_x origin_y.
+    """
+    if body.subdir not in LABELED_SCREENSHOT_SUBDIRS_WRITABLE:
+        raise HTTPException(
+            status_code=400,
+            detail="subdir must be labeled/screenshots/regular or labeled/screenshots/blueprint",
+        )
+    if "/" in body.filename or "\\" in body.filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    base = (_data_dir() / body.subdir).resolve()
+    base.mkdir(parents=True, exist_ok=True)
+    png_path = (base / body.filename).resolve()
+    try:
+        png_path.relative_to(base)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    if png_path.suffix.lower() not in (".png", ".jpg", ".jpeg"):
+        raise HTTPException(status_code=400, detail="Filename must be an image")
+    txt_path = png_path.with_suffix(".txt")
+    try:
+        txt_path.write_text(f"{body.origin_x} {body.origin_y}\n")
+    except OSError as e:
+        logger.exception("Failed to write origin .txt")
+        if getattr(e, "errno", None) == 30:
+            raise HTTPException(
+                status_code=503,
+                detail="The data directory is read-only. If running in Docker, mount the data volume with write access (e.g. a writable bind mount for ./data).",
+            ) from e
+        raise HTTPException(status_code=500, detail="Failed to save origin") from e
+    return {"ok": True, "path": str(txt_path.relative_to(_data_dir()))}
+
+
 @router.get("/api/extract/screenshots")
 async def list_screenshots(
     subdir: str = "unlabeled/screenshots",
@@ -59,7 +127,9 @@ async def list_screenshots(
     List screenshot filenames in the given subdir.
 
     Query params:
-        subdir: One of unlabeled/screenshots, labeled/screenshots/regular, labeled/screenshots/blueprint
+        subdir: One of unlabeled/screenshots, labeled/screenshots/regular,
+                labeled/screenshots/blueprint, labeled/augmented/regular,
+                labeled/augmented/blueprint
     """
     if subdir not in ALLOWED_SCREENSHOT_SUBDIRS:
         raise HTTPException(status_code=400, detail="Invalid subdir")

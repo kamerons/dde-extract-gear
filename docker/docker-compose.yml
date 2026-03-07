@@ -25,7 +25,7 @@ services:
       - REDIS_DB=0
       - DATA_FILE_PATH=data/collected.json
     volumes:
-      - ../data:/app/data:ro
+      - ../data:/app/data
     depends_on:
       redis:
         condition: service_healthy
@@ -46,7 +46,7 @@ services:
       - REDIS_DB=0
       - DATA_FILE_PATH=data/collected.json
     volumes:
-      - ../data:/app/data:ro
+      - ../data:/app/data
     depends_on:
       redis:
         condition: service_healthy

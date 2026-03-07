@@ -16,7 +16,7 @@ services:
       ]
     # Mount source code for hot-reload (paths relative to compose file dir = docker/)
     volumes:
-      - ../data:/app/data:ro
+      - ../data:/app/data
       - ..:/app
       - ../requirements.txt:/app/requirements.txt
     build:
@@ -26,7 +26,7 @@ services:
   task:
     # Mount source code (worker will need manual restart for changes)
     volumes:
-      - ../data:/app/data:ro
+      - ../data:/app/data
       - ..:/app
       - ../requirements.txt:/app/requirements.txt
     # Note: Python workers don't auto-reload, you'll need to restart the container
