@@ -283,6 +283,7 @@ class TrainingStartRequest(BaseModel):
     """Request body for POST /api/extract/training/start."""
 
     model_type: str = "box_detector"
+    resume_from_existing: bool = False
 
 
 @router.post("/api/extract/training/start")
@@ -294,8 +295,12 @@ async def training_start(body: TrainingStartRequest | None = None):
     model_type = (body.model_type if body is not None else "box_detector") or "box_detector"
     if model_type != "box_detector":
         raise HTTPException(status_code=400, detail="Only model_type 'box_detector' is supported")
+    resume_from_existing = body.resume_from_existing if body is not None else False
     try:
-        task_id = task_service.create_training_task(model_type=model_type)
+        task_id = task_service.create_training_task(
+            model_type=model_type,
+            resume_from_existing=resume_from_existing,
+        )
     except Exception as e:
         logger.exception("Failed to create training task")
         raise HTTPException(status_code=500, detail=str(e)) from e

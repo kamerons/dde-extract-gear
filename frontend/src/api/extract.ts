@@ -209,6 +209,23 @@ export async function startTraining(): Promise<TrainingStartResponse> {
 }
 
 /**
+ * Start a box detector training task using the existing saved model as the initial weights.
+ * Poll with getTrainingTaskStatus(task_id). If no model exists, the backend builds a fresh one.
+ */
+export async function startTrainingResumingFromExisting(): Promise<TrainingStartResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/extract/training/start`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model_type: 'box_detector', resume_from_existing: true }),
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Failed to start training: ${response.status} ${text}`);
+  }
+  return response.json();
+}
+
+/**
  * Request cancellation of the current training task.
  */
 export async function stopTraining(): Promise<TrainingStopResponse> {

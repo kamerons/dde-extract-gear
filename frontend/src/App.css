@@ -108,14 +108,14 @@
   cursor: not-allowed;
 }
 
-.stat-checkbox-label input[type='checkbox'] {
+.stat-checkbox-label input[type="checkbox"] {
   width: 18px;
   height: 18px;
   cursor: pointer;
   accent-color: var(--color-accent);
 }
 
-.stat-checkbox-label.disabled input[type='checkbox'] {
+.stat-checkbox-label.disabled input[type="checkbox"] {
   cursor: not-allowed;
 }
 
@@ -187,7 +187,9 @@
   font-weight: 600;
   border-radius: 6px;
   cursor: pointer;
-  transition: background-color 0.2s, transform 0.1s;
+  transition:
+    background-color 0.2s,
+    transform 0.1s;
 }
 
 .submit-button:hover:not(:disabled) {
@@ -282,7 +284,9 @@
   font-weight: 600;
   border-radius: 6px;
   cursor: pointer;
-  transition: background-color 0.2s, transform 0.1s;
+  transition:
+    background-color 0.2s,
+    transform 0.1s;
 }
 
 .back-button:hover {
@@ -309,7 +313,9 @@
   border-radius: 12px;
   padding: 1.5rem;
   box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-  transition: transform 0.2s, box-shadow 0.2s;
+  transition:
+    transform 0.2s,
+    box-shadow 0.2s;
 }
 
 .recommendation-card:hover {
@@ -946,7 +952,9 @@
 }
 
 /* Training page: limit image wrapper width so the left column doesn't stretch too far */
-.extract-config--training-page .extract-config-origin-layout .extract-config-image-wrapper {
+.extract-config--training-page
+  .extract-config-origin-layout
+  .extract-config-image-wrapper {
   max-width: 900px;
 }
 
@@ -1006,6 +1014,26 @@
 
 .extract-config-save-button:hover {
   background: #e8e8e8;
+}
+
+.extract-config-resume-button {
+  padding: 0.5rem 1rem;
+  font-size: 0.95rem;
+  border: 1px solid #888;
+  border-radius: 6px;
+  background: transparent;
+  color: #555;
+  cursor: pointer;
+}
+
+.extract-config-resume-button:hover:not(:disabled) {
+  background: #f0f0f0;
+  color: #333;
+}
+
+.extract-config-resume-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .extract-config-save-ok {

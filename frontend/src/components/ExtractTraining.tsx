@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   startTraining,
+  startTrainingResumingFromExisting,
   stopTraining,
   getTrainingTaskStatus,
   getExtractConfig,
@@ -105,6 +106,25 @@ export function ExtractTraining() {
     taskPreviewExpectedDurationMsRef.current = null;
     try {
       const { task_id } = await startTraining();
+      setTrainingTaskId(task_id);
+      setTrainingStatus('pending');
+      setTrainingProgress(null);
+    } catch (e) {
+      setTrainingError(e instanceof Error ? e.message : 'Failed to start training');
+    }
+  }, []);
+
+  const handleStartTrainingResuming = useCallback(async () => {
+    setTrainingError(null);
+    setTrainingResults(null);
+    setLatestEval(null);
+    setLatestPreview(null);
+    setPreviewWaitStart(null);
+    prevEvalKeyRef.current = null;
+    lastEpochWithPreviewRef.current = -1;
+    taskPreviewExpectedDurationMsRef.current = null;
+    try {
+      const { task_id } = await startTrainingResumingFromExisting();
       setTrainingTaskId(task_id);
       setTrainingStatus('pending');
       setTrainingProgress(null);
@@ -282,6 +302,14 @@ export function ExtractTraining() {
               disabled={trainingStatus === 'pending' || trainingStatus === 'processing'}
             >
               Start training
+            </button>
+            <button
+              type="button"
+              className="extract-config-resume-button"
+              onClick={handleStartTrainingResuming}
+              disabled={trainingStatus === 'pending' || trainingStatus === 'processing'}
+            >
+              Start over (resume from model)
             </button>
             <button
               type="button"

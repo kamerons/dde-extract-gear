@@ -262,6 +262,9 @@ class TaskWorker:
         """Process a single training task (e.g. box detector)."""
         task_id = task_data["task_id"]
         model_type = task_data.get("model_type", "box_detector")
+        resume_from_existing = task_data.get("resume_from_existing", False)
+        if isinstance(resume_from_existing, str):
+            resume_from_existing = resume_from_existing.lower() == "true"
 
         logger.info(f"Processing training task {task_id} (model_type={model_type})")
 
@@ -305,6 +308,7 @@ class TaskWorker:
                     task_id=task_id,
                     progress_callback=progress_callback,
                     check_cancelled=check_cancelled,
+                    resume_from_existing=resume_from_existing,
                 )
             else:
                 self._clear_current_task(self.TRAINING_CURRENT_TASK_KEY)

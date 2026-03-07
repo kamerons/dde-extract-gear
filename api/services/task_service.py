@@ -93,7 +93,11 @@ class TaskService:
         logger.info(f"Created task {task_id}")
         return task_id
 
-    def create_training_task(self, model_type: str = "box_detector") -> str:
+    def create_training_task(
+        self,
+        model_type: str = "box_detector",
+        resume_from_existing: bool = False,
+    ) -> str:
         """
         Create a new training task. Cancels any currently running training task.
 
@@ -124,7 +128,11 @@ class TaskService:
         self.redis_client.hset(meta_key, mapping=task_meta)
         self.redis_client.expire(meta_key, self.TASK_EXPIRY_SECONDS)
 
-        task_data = {"task_id": task_id, "model_type": model_type}
+        task_data = {
+            "task_id": task_id,
+            "model_type": model_type,
+            "resume_from_existing": resume_from_existing,
+        }
         self.redis_client.rpush(self.TRAINING_QUEUE_KEY, json.dumps(task_data))
 
         logger.info(f"Created training task {task_id}")

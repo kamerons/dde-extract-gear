@@ -7,6 +7,9 @@ number of epochs. Supports progress callback and cancellation.
 
 import logging
 import os
+import shutil
+import tempfile
+import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional
@@ -163,6 +166,53 @@ def _build_model():
     return model
 
 
+def _resolve_box_detector_load_path(data_dir: Path, model_path: str) -> Path | None:
+    """
+    Path to load for box detector: _current, latest timestamped, or legacy stem.keras.
+    Returns load_path or None if no file exists.
+    """
+    model_dir = (data_dir / "models" / "box_detector").resolve()
+    stem = Path(model_path).name
+    if stem.endswith(".keras") or stem.endswith(".h5"):
+        stem = Path(stem).stem
+    current_path = model_dir / (stem + "_current.keras")
+    legacy_path = model_dir / (stem + ".keras")
+
+    if current_path.exists():
+        return current_path
+    timestamped = sorted(
+        model_dir.glob(f"{stem}_[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]_[0-9][0-9][0-9][0-9][0-9][0-9].keras"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    if timestamped:
+        return timestamped[0]
+    if legacy_path.exists():
+        return legacy_path
+    return None
+
+
+def _load_existing_model(load_path: Path):
+    """Load Keras model from path (temp copy + load_model). Raises on failure."""
+    from tensorflow import keras
+
+    is_keras_zip = zipfile.is_zipfile(load_path)
+    logger.info(
+        "Loading existing box detector model from %s (format: %s)",
+        load_path,
+        ".keras zip" if is_keras_zip else "HDF5",
+    )
+    suffix = ".keras" if is_keras_zip else ".h5"
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
+        tmp_path = Path(f.name)
+    try:
+        shutil.copy2(load_path, tmp_path)
+        compile_load = is_keras_zip
+        return keras.models.load_model(str(tmp_path), compile=compile_load)
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
 def _compute_test_metrics(model, X_test: np.ndarray, y_test: np.ndarray) -> dict:
     """Predict on test set; scale back to pixel space and compute MAE (in input 256 space for simplicity)."""
     if len(X_test) == 0:
@@ -208,11 +258,13 @@ class BoxDetectorProcessor:
         task_id: str,
         progress_callback: Optional[Callable[[int, int, dict], None]] = None,
         check_cancelled: Optional[Callable[[], bool]] = None,
+        resume_from_existing: bool = False,
     ) -> dict:
         """
         Run box detector training. Re-scans labeled dirs each epoch; train and test sets
         grow as new images are labeled. Test set is augmented for larger evaluation.
         Raises TaskCancelledError if check_cancelled returns True.
+        If resume_from_existing is True, load the existing saved model when present; otherwise build a new one.
         """
         labeled = _labeled_dirs(self._data_dir_abs)
         if not labeled:
@@ -235,12 +287,27 @@ class BoxDetectorProcessor:
                 "message": "No training samples after split (test_ratio may be too high).",
             }
 
-        model = _build_model()
         # Save under data/models/box_detector so we always write to the mounted volume
         save_dir = self._data_dir_abs / "models" / "box_detector"
         stem = Path(self.model_path).name
+        if stem.endswith(".keras") or stem.endswith(".h5"):
+            stem = Path(stem).stem
         save_dir.mkdir(parents=True, exist_ok=True)
         _relax_path_for_host(save_dir, is_dir=True)
+
+        if resume_from_existing:
+            load_path = _resolve_box_detector_load_path(self._data_dir_abs, self.model_path)
+            if load_path is not None:
+                try:
+                    model = _load_existing_model(load_path)
+                except Exception as e:
+                    logger.warning("Failed to load existing model from %s: %s; building fresh model", load_path, e)
+                    model = _build_model()
+            else:
+                logger.info("No existing model found; building fresh model")
+                model = _build_model()
+        else:
+            model = _build_model()
 
         for epoch in range(1, self.epochs + 1):
             if check_cancelled and check_cancelled():
