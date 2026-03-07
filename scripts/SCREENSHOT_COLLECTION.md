@@ -16,4 +16,11 @@ Output paths and naming must follow the canonical layout in [shared/DATA_LAYOUT.
 
 ## Dependencies
 
-Specific libraries (e.g. for keyboard listening and screen capture) are TBD; the legacy code used `api_pyautogui` and `api_keyboard`-style abstractions for reference.
+The script uses **pynput** (keyboard) and **mss** + **Pillow** (screen capture). The API/task Docker images do not include pynput (it requires Linux kernel headers to build). To run the script locally:
+
+```bash
+pip install -r requirements.txt
+pip install -r requirements-scripts.txt
+```
+
+On Linux, if building `evdev` (a pynput dependency) fails, install kernel headers first, e.g. `apt-get install linux-headers-$(uname -r)`.

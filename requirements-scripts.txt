@@ -1,0 +1,5 @@
+# Dependencies for scripts that run on the host (not in Docker).
+# Install with: pip install -r requirements-scripts.txt
+# On Linux, pynput may require kernel headers: apt-get install linux-headers-$(uname -r)
+
+pynput>=0.7.6

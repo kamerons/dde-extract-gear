@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from shared.data_loader import DataLoader
 from shared.recommendation_engine import RecommendationEngine
-from api.routes import recommendations, tasks
+from api.routes import recommendations, tasks, extract
 
 # Configure logging
 logging.basicConfig(
@@ -69,6 +69,7 @@ app.add_middleware(
 # Include routers
 app.include_router(recommendations.router)
 app.include_router(tasks.router)
+app.include_router(extract.router)
 
 
 @app.get("/")

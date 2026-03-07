@@ -711,3 +711,144 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* App tabs (Recommendations | Configuration) */
+.app-with-tabs {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-tabs {
+  display: flex;
+  gap: 0;
+  padding: 0 2rem;
+  background: #f5f5f5;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.app-tab {
+  padding: 1rem 1.5rem;
+  border: none;
+  background: transparent;
+  font-size: 1rem;
+  font-weight: 500;
+  color: #666;
+  cursor: pointer;
+  border-bottom: 3px solid transparent;
+  margin-bottom: -1px;
+}
+
+.app-tab:hover {
+  color: #1a1a1a;
+}
+
+.app-tab-active {
+  color: #646cff;
+  border-bottom-color: #646cff;
+}
+
+.app-tab-panel {
+  flex: 1;
+}
+
+/* Extract configuration tab */
+.extract-config .extract-config-controls .extract-config-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+  align-items: flex-end;
+}
+
+.extract-config .extract-config-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: #333;
+}
+
+.extract-config-select {
+  min-width: 160px;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  font-size: 1rem;
+}
+
+.extract-config-origin-inputs,
+.extract-config-scale-input {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.extract-config-origin-inputs label,
+.extract-config-scale-input label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #333;
+}
+
+.extract-config-number {
+  width: 6rem;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  font-size: 1rem;
+}
+
+.extract-config-image-wrapper {
+  margin-top: 1rem;
+}
+
+.extract-config-image-container {
+  position: relative;
+  display: inline-block;
+  cursor: crosshair;
+}
+
+.extract-config-image {
+  display: block;
+  vertical-align: top;
+}
+
+.extract-config-overlay {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+}
+
+.extract-config-origin-marker {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #c00;
+  border: 2px solid #fff;
+  pointer-events: none;
+}
+
+.extract-config-no-images {
+  color: #666;
+  font-style: italic;
+  padding: 2rem;
+}
+
+.extract-config-env-block {
+  margin: 0;
+  padding: 1rem 1.25rem;
+  background: #1a1a1a;
+  color: #e0e0e0;
+  border-radius: 6px;
+  font-family: ui-monospace, monospace;
+  font-size: 0.9rem;
+  white-space: pre;
+  overflow-x: auto;
+}

@@ -31,6 +31,6 @@ Neural network training runs as a **task** in the existing task worker, using th
 
 ## Interaction with API and front-end
 
-- The **front-end** sends labels to the API (e.g. box coordinates + class for screenshots, or icon/digit labels for cropped images).
+- The **front-end** sends labels to the API (e.g. box coordinates for screenshots; icon/digit labels for cropped images). Screenshot type (regular vs blueprint) is provided by the user when organizing data (see [shared/DATA_LAYOUT.md](../shared/DATA_LAYOUT.md)), not by the model.
 - The **API** persists those labels into the `data/labeled/` tree per the data layout and may enqueue a training task.
 - When the **task worker** runs a training task, it reads from the same `data/` layout. No code is specified here; this is the intended flow.

@@ -16,6 +16,9 @@ class Config:
     # Data file path
     DATA_FILE_PATH: str = os.getenv("DATA_FILE_PATH", "data/collected.json")
 
+    # Data directory for extract pipeline (screenshots, etc.)
+    DATA_DIR: str = os.getenv("DATA_DIR", "data")
+
     # API configuration
     API_HOST: str = os.getenv("API_HOST", "0.0.0.0")
     API_PORT: int = int(os.getenv("API_PORT", "8000"))

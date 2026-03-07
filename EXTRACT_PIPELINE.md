@@ -13,17 +13,16 @@ This document outlines the architecture for moving from fake armor data to real 
 
 ### 2. Box detector
 
-- A new neural network takes a **full screenshot** and outputs:
-  - The **top-left** of the gear/card box.
-  - A **classification**: type 1 (“regular”) or type 2 (“blueprint”).
-- Box **dimensions** are read from a config file (two sizes, one per type).
+- A neural network takes a **full screenshot** and outputs the **top-left** of the gear/card box only. That top-left is **not** stored in config; it is computed at inference time by the model.
+- Screenshot **type** (regular vs blueprint) is **not** predicted by the model; it is known from labeling (e.g. by placing images in `labeled/screenshots/regular/` or `labeled/screenshots/blueprint/` per [shared/DATA_LAYOUT.md](shared/DATA_LAYOUT.md)).
+- Box dimensions and region layout are derived from config. The only values stored for extract layout are **two scale factors**: one for regular screenshots and one for blueprint (e.g. `EXTRACT_REGULAR_SCALE`, `EXTRACT_BLUEPRINT_SCALE` in .env). The front-end config UI lets users tune these so region overlays align; users copy the values into .env manually.
 - Training uses a **limited initial labeled set** plus **ongoing labels from the front-end**; labeling and training happen in the same workflow.
 - **Augmentation**: small translations of the image during training.
 - A defined portion of labeled data is **reserved as a test set**.
 
 ### 3. Two image classifiers
 
-- The legacy **image_splitter** is recreated (sizes and offsets from config, plus box type). It uses the box detector’s output (top-left + type) to crop regions from the screenshot.
+- The legacy **image_splitter** is recreated (sizes and offsets from config, plus box type). It uses the box detector’s output (top-left) and the **user-provided type** (from the path or manifest) to crop regions from the screenshot.
 - Those crops feed two classifiers, trained via the same **interactive labeling** process:
   - **Stat-type (icon)** classifier: which stat the icon represents.
   - **Stat-value (digit)** classifier: digit (and possibly “blob”) recognition.

@@ -19,10 +19,10 @@ Ground-truth data used for training and evaluation.
 ### Screenshots (box detector)
 
 - **Images**: `data/labeled/screenshots/<type>/<id>.png`
-  - `<type>` is the box classification, e.g. `blueprint` or `regular` (or `type1` / `type2` if that naming is chosen).
-  - Example: `data/labeled/screenshots/blueprint/001.png`, `data/labeled/screenshots/regular/001.png`.
+  - `<type>` is **user-provided** when organizing or importing screenshots: `regular` (standard armor card) or `blueprint` (blueprint card). The neural network does not classify type; you assign it (e.g. by placing images in the corresponding folder).
+  - Example: `data/labeled/screenshots/blueprint/031.png`, `data/labeled/screenshots/regular/001.png`.
 - **Box coordinates**: For each image, a companion text file with the same base name holds the **top-left** of the box.
-  - Example: `data/labeled/screenshots/blueprint/001.txt` contains the coordinates for the box in `001.png`.
+  - Example: `data/labeled/screenshots/blueprint/031.txt` contains the coordinates for the box in `031.png`.
 
 ### Numbers (digit / stat-value classifier)
 

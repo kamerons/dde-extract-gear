@@ -1,0 +1,13 @@
+---
+description: Use the venv directory for the Python virtual environment
+alwaysApply: true
+---
+
+# Python virtual environment
+
+Use the **venv** directory (not `.venv`) for the project’s Python virtual environment.
+
+- Create: `python -m venv venv`
+- Activate (Unix): `source venv/bin/activate`
+- Activate (Windows): `venv\Scripts\activate`
+- When suggesting commands or setup steps, assume the active environment is `venv`.
