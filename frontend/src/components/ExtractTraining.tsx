@@ -252,6 +252,7 @@ export function ExtractTraining() {
               showScaleInput={false}
               showSaveOriginButton={true}
               showAugmentPreview={false}
+              preferUnlabeledRandom={true}
               onOriginSaved={loadTrainingDataCounts}
             />
           )}

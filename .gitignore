@@ -4,7 +4,7 @@ env
 *.png
 *.json
 data/*.keras
-data/*.txt
+data/**/*.txt
 data/models/
 .vscode
 

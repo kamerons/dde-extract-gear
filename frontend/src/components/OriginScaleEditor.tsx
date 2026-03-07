@@ -20,14 +20,19 @@ export interface OriginScaleEditorProps {
   showSaveOriginButton?: boolean;
   /** When true, show the augmentation preview section (Configuration tab only). */
   showAugmentPreview?: boolean;
+  /** When true (e.g. Training tab), load a random unlabeled image on init and after Enter-after-save; arrow keys nudge origin, Enter saves then loads next. */
+  preferUnlabeledRandom?: boolean;
   /** Called after origin is saved successfully; e.g. parent can refetch training data counts. */
   onOriginSaved?: () => void;
 }
+
+type SubdirItem = { subdir: string; filename: string; hasOrigin: boolean };
 
 export function OriginScaleEditor({
   showScaleInput = true,
   showSaveOriginButton = true,
   showAugmentPreview = false,
+  preferUnlabeledRandom = false,
   onOriginSaved,
 }: OriginScaleEditorProps) {
   const [imageType, setImageType] = useState<ImageType>('regular');
@@ -48,6 +53,9 @@ export function OriginScaleEditor({
   const imageRef = useRef<HTMLImageElement | null>(null);
   const previewCanvasPosRef = useRef<HTMLCanvasElement | null>(null);
   const previewCanvasNegRef = useRef<HTMLCanvasElement | null>(null);
+  const imageContainerRef = useRef<HTMLDivElement | null>(null);
+  const enterNextLoadsNewImageRef = useRef<boolean>(false);
+  const initialLoadDoneRef = useRef<boolean>(false);
 
   const backendScale =
     imageType === 'blueprint'
@@ -59,13 +67,17 @@ export function OriginScaleEditor({
       : regularScale
     : backendScale;
 
-  const loadScreenshots = useCallback(async () => {
+  const loadScreenshots = useCallback(async (overrideType?: ImageType) => {
+    const type = overrideType ?? imageType;
     const subdir =
-      imageType === 'blueprint' ? EXTRACT_SUBDIRS.blueprint : EXTRACT_SUBDIRS.regular;
+      type === 'blueprint' ? EXTRACT_SUBDIRS.blueprint : EXTRACT_SUBDIRS.regular;
     try {
       const res = await listScreenshots(subdir);
       setFilenames(res.filenames);
       setHasOriginSet(new Set(res.has_origin ?? []));
+      if (overrideType != null) {
+        setImageType(type);
+      }
       if (res.filenames.length > 0) {
         setSelectedFilename((prev) =>
           prev && res.filenames.includes(prev) ? prev : res.filenames[0]
@@ -81,9 +93,71 @@ export function OriginScaleEditor({
     }
   }, [imageType]);
 
+  const loadBothAndSelectRandomUnlabeled = useCallback(async () => {
+    try {
+      const [resRegular, resBlueprint] = await Promise.all([
+        listScreenshots(EXTRACT_SUBDIRS.regular),
+        listScreenshots(EXTRACT_SUBDIRS.blueprint),
+      ]);
+      const hasOriginRegular = new Set(resRegular.has_origin ?? []);
+      const hasOriginBlueprint = new Set(resBlueprint.has_origin ?? []);
+      const items: SubdirItem[] = [
+        ...resRegular.filenames.map((filename) => ({
+          subdir: EXTRACT_SUBDIRS.regular,
+          filename,
+          hasOrigin: hasOriginRegular.has(filename),
+        })),
+        ...resBlueprint.filenames.map((filename) => ({
+          subdir: EXTRACT_SUBDIRS.blueprint,
+          filename,
+          hasOrigin: hasOriginBlueprint.has(filename),
+        })),
+      ];
+      if (items.length === 0) {
+        setFilenames([]);
+        setHasOriginSet(new Set());
+        setImageType('regular');
+        setSelectedFilename(null);
+        setOriginX(0);
+        setOriginY(0);
+        return;
+      }
+      const unlabeled = items.filter((i) => !i.hasOrigin);
+      const pick =
+        unlabeled.length > 0
+          ? unlabeled[Math.floor(Math.random() * unlabeled.length)]
+          : items[0];
+      const isBlueprint = pick.subdir === EXTRACT_SUBDIRS.blueprint;
+      setImageType(isBlueprint ? 'blueprint' : 'regular');
+      setFilenames(
+        isBlueprint ? resBlueprint.filenames : resRegular.filenames
+      );
+      setHasOriginSet(
+        new Set(
+          isBlueprint ? resBlueprint.has_origin ?? [] : resRegular.has_origin ?? []
+        )
+      );
+      setSelectedFilename(pick.filename);
+      setOriginX(0);
+      setOriginY(0);
+    } catch (e) {
+      console.error('Failed to load screenshots for random unlabeled', e);
+      setFilenames([]);
+      setHasOriginSet(new Set());
+      setSelectedFilename(null);
+    }
+  }, []);
+
   useEffect(() => {
+    if (preferUnlabeledRandom) {
+      if (initialLoadDoneRef.current) return;
+      initialLoadDoneRef.current = true;
+      loadBothAndSelectRandomUnlabeled();
+      return;
+    }
+    initialLoadDoneRef.current = false;
     loadScreenshots();
-  }, [loadScreenshots]);
+  }, [preferUnlabeledRandom, loadScreenshots, loadBothAndSelectRandomUnlabeled]);
 
   useEffect(() => {
     if (!showScaleInput || showAugmentPreview) {
@@ -167,6 +241,7 @@ export function OriginScaleEditor({
     const fullResY = Math.round(y / DISPLAY_SCALE);
     setOriginX(fullResX);
     setOriginY(fullResY);
+    target.focus();
   };
 
   const handleImageLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
@@ -186,11 +261,14 @@ export function OriginScaleEditor({
       setSaveStatus('success');
       await loadScreenshots();
       onOriginSaved?.();
+      if (preferUnlabeledRandom) {
+        enterNextLoadsNewImageRef.current = true;
+      }
     } catch (e) {
       setSaveStatus('error');
       setSaveErrorMessage(e instanceof Error ? e.message : 'Failed to save origin');
     }
-  }, [selectedFilename, screenshotSubdir, originX, originY, loadScreenshots, onOriginSaved]);
+  }, [selectedFilename, screenshotSubdir, originX, originY, loadScreenshots, onOriginSaved, preferUnlabeledRandom]);
 
   useEffect(() => {
     if (saveStatus === null) return;
@@ -206,6 +284,63 @@ export function OriginScaleEditor({
     screenshotSubdir === EXTRACT_SUBDIRS.blueprint;
   const canSaveOrigin = isLabeledSubdir && selectedFilename != null;
   const showLabelBadges = isLabeledSubdir && filenames.length > 0;
+
+  const handleImageKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      const step = e.shiftKey ? 5 : 1;
+      const w = imageNaturalSize?.width ?? Infinity;
+      const h = imageNaturalSize?.height ?? Infinity;
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        e.stopPropagation();
+        setOriginX((prev) => Math.max(0, prev - step));
+        return;
+      }
+      if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        e.stopPropagation();
+        setOriginX((prev) => Math.min(w, prev + step));
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        e.stopPropagation();
+        setOriginY((prev) => Math.max(0, prev - step));
+        return;
+      }
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        e.stopPropagation();
+        setOriginY((prev) => Math.min(h, prev + step));
+        return;
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        e.stopPropagation();
+        if (enterNextLoadsNewImageRef.current) {
+          enterNextLoadsNewImageRef.current = false;
+          loadBothAndSelectRandomUnlabeled().then(() => {
+            setTimeout(() => imageContainerRef.current?.focus(), 0);
+          });
+          return;
+        }
+        if (canSaveOrigin) {
+          handleSaveOrigin();
+        }
+        return;
+      }
+      if (e.key === ' ') {
+        e.preventDefault();
+      }
+    },
+    [
+      imageNaturalSize?.width,
+      imageNaturalSize?.height,
+      handleSaveOrigin,
+      loadBothAndSelectRandomUnlabeled,
+      canSaveOrigin,
+    ]
+  );
 
   const imageUrl = selectedFilename
     ? getScreenshotUrl(selectedFilename, screenshotSubdir)
@@ -240,7 +375,13 @@ export function OriginScaleEditor({
             Image type
             <select
               value={imageType}
-              onChange={(e) => setImageType(e.target.value as ImageType)}
+              onChange={(e) => {
+                const newType = e.target.value as ImageType;
+                setImageType(newType);
+                if (preferUnlabeledRandom) {
+                  loadScreenshots(newType);
+                }
+              }}
               className="extract-config-select"
             >
               <option value="regular">Regular</option>
@@ -342,18 +483,17 @@ export function OriginScaleEditor({
         <div className="extract-config-image-wrapper">
         {imageUrl && (
           <div
+            ref={imageContainerRef}
             className="extract-config-image-container"
             style={{
               width: displayWidth || 'auto',
               height: displayHeight || 'auto',
             }}
             onClick={handleImageClick}
+            onKeyDown={handleImageKeyDown}
             role="button"
             tabIndex={0}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') e.preventDefault();
-            }}
-            aria-label="Click to set top-left corner of armor tab"
+            aria-label="Click to set top-left corner of armor tab. Use arrow keys to nudge, Enter to save or load next image."
           >
             <img
               ref={imageRef}
