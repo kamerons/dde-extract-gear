@@ -1,8 +1,11 @@
-FROM python:3.11-slim
+# Use official TensorFlow GPU image so the container has CUDA and cuDNN.
+# The host NVIDIA driver is injected by nvidia-container-toolkit; this image
+# provides the matching CUDA runtime and cuDNN that TensorFlow expects.
+FROM tensorflow/tensorflow:2.15.0-gpu
 
 WORKDIR /app
 
-# Copy requirements and install dependencies
+# Copy requirements and install dependencies (TensorFlow is already in the image)
 COPY requirements.txt /app/
 RUN pip install --no-cache-dir -r requirements.txt
 

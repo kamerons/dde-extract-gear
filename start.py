@@ -41,8 +41,12 @@ def get_project_root():
     return Path(__file__).parent
 
 
-def start_containers():
-    """Start all Docker containers in dev mode (API hot-reload, source mounted)."""
+def start_containers(build=False):
+    """Start all Docker containers in dev mode (API hot-reload, source mounted).
+
+    By default, images are only built if missing (fast restarts). Pass --build to
+    force a rebuild after changing Dockerfiles or requirements.
+    """
     if not check_docker():
         print("✗ ERROR: Docker is not installed or not available in PATH")
         print("  Please install Docker and Docker Compose to continue.")
@@ -59,6 +63,10 @@ def start_containers():
     print("Starting Docker containers (dev mode)...")
     print(f"  Base: {base_file}")
     print(f"  Dev:  {dev_file}")
+    if build:
+        print("  Build: forcing image rebuild")
+    else:
+        print("  Build: only if images are missing (use --build to force rebuild)")
     print("\n  API: http://localhost:8000  (hot-reload on)")
     print("  Data: ./data is mounted writable (for Save origin, augmentation output, etc.)")
     print("  Redis: localhost:6379")
@@ -69,14 +77,18 @@ def start_containers():
         project_root = get_project_root()
         os.chdir(project_root)
 
+        cmd = [
+            "docker", "compose",
+            "-f", str(base_file),
+            "-f", str(dev_file),
+            "up",
+        ]
+        if build:
+            cmd.append("--build")
+
         # -f base -f dev: API gets --reload + source mount; foreground so logs are visible
         subprocess.run(
-            [
-                "docker", "compose",
-                "-f", str(base_file),
-                "-f", str(dev_file),
-                "up", "--build",
-            ],
+            cmd,
             check=True,
             text=True,
         )
@@ -130,17 +142,20 @@ def main():
     """Main entry point."""
     if len(sys.argv) < 2:
         print("Usage: python start.py [start|stop]")
+        print("       python start.py start [--build]   # --build forces image rebuild")
         sys.exit(1)
 
     command = sys.argv[1].lower()
+    build = "--build" in sys.argv
 
     if command == "start":
-        start_containers()
+        start_containers(build=build)
     elif command == "stop":
         stop_containers()
     else:
         print(f"✗ ERROR: Unknown command '{command}'")
         print("Usage: python start.py [start|stop]")
+        print("       python start.py start [--build]   # --build forces image rebuild")
         sys.exit(1)
 
 

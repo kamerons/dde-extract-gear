@@ -63,12 +63,53 @@ cd frontend
 npm run dev
 ```
 
-## Production Build
+## Start script (python start.py)
 
-For production, use the standard docker-compose:
+From the repo root:
 
 ```bash
 python start.py start
 ```
 
-This builds production images without hot-reload.
+This starts all containers in dev mode (API hot-reload, source mounts). **Images are only built when missing**, so subsequent runs are fast. After changing a Dockerfile or `requirements.txt`, force a rebuild with:
+
+```bash
+python start.py start --build
+```
+
+## GPU acceleration (training / task worker)
+
+The **task** service runs TensorFlow/Keras for training and inference. To use your NVIDIA GPU inside the task container:
+
+### 1. Host setup
+
+- **NVIDIA driver**: Install the appropriate driver for your GPU (e.g. from [NVIDIA](https://www.nvidia.com/Download/index.aspx) or your distro). Verify with `nvidia-smi`.
+- **NVIDIA Container Toolkit**: So Docker can pass the GPU into the container.
+
+  **Ubuntu/Debian:**
+  ```bash
+  distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
+  curl -s -L https://nvidia.github.io/libnvidia-container/gpgkey | sudo apt-key add -
+  curl -s -L https://nvidia.github.io/libnvidia-container/$distribution/libnvidia-container.list | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+  sudo apt-get update && sudo apt-get install -y nvidia-container-toolkit
+  sudo nvidia-ctk runtime configure --runtime=docker
+  ```
+  Then restart Docker: `sudo systemctl restart docker` (or restart the Docker daemon your system uses).
+
+  **Other distros:** See [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html).
+
+### 2. Compose configuration
+
+`docker/docker-compose.yml` already reserves one GPU for the task service (`deploy.resources.reservations.devices`). To use all GPUs, edit the task service and set `count: all` instead of `count: 1`.
+
+### 3. Verify
+
+After bringing the stack up, check that the task container sees the GPU:
+
+```bash
+docker exec armor_select_task nvidia-smi
+```
+
+If the toolkit or driver is missing, the task will still run but TensorFlow will log that the GPU is not used and will use CPU instead.
+
+The task image is based on `tensorflow/tensorflow:2.15.0-gpu`, which includes the CUDA and cuDNN libraries TensorFlow needs. If you still see "Could not find cuda drivers" or "Error loading CUDA libraries" despite `nvidia-smi` working in the container, ensure your host driver is compatible with the CUDA version bundled in that image (see [TensorFlow GPU support](https://www.tensorflow.org/install/pip#linux)); very new drivers are usually backward compatible. The app will fall back to CPU if GPU is unavailable.

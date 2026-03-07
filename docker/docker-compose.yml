@@ -51,6 +51,16 @@ services:
       redis:
         condition: service_healthy
     restart: unless-stopped
+    # GPU for TensorFlow/Keras training and inference (optional; requires nvidia-container-toolkit on host)
+    deploy:
+      resources:
+        reservations:
+          memory: 4G
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+        # No memory limit — container can use more when available (helps training)
 
   frontend:
     build:
