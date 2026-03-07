@@ -30,6 +30,7 @@ export interface ExtractConfigResponse {
   augment_shift_regular: number;
   augment_shift_blueprint: number;
   augment_fill: string;
+  augment_count: number;
   preview_every_n_epochs: number;
   preview_expected_duration_ms: number;
 }
@@ -80,15 +81,41 @@ export async function saveOrigin(
 
 /**
  * List screenshot filenames in the given subdir.
+ * For labeled/screenshots/regular and labeled/screenshots/blueprint, the response
+ * includes has_origin: string[] (subset of filenames that have a saved origin .txt).
  */
 export async function listScreenshots(
   subdir: string = EXTRACT_SUBDIRS.unlabeled
-): Promise<{ filenames: string[] }> {
+): Promise<{ filenames: string[]; has_origin?: string[] }> {
   const params = new URLSearchParams({ subdir });
   const response = await fetch(`${API_BASE_URL}/api/extract/screenshots?${params}`);
   if (!response.ok) {
     const text = await response.text();
     throw new Error(`Failed to list screenshots: ${response.status} ${text}`);
+  }
+  return response.json();
+}
+
+export interface TrainingDataCountsResponse {
+  /** Number of source images (labeled with .txt). */
+  total: number;
+  regular: number;
+  blueprint: number;
+  /** Each source image is expanded to this many augmented samples per epoch. */
+  augment_count: number;
+  /** total × augment_count; max augmented samples per epoch (before train/test split). */
+  augmented_samples_per_epoch_max: number;
+}
+
+/**
+ * Fetch counts of labeled screenshots (source images with .txt) and augmentation info.
+ * Used to show "X images ready for training" and how many augmented samples are used.
+ */
+export async function getTrainingDataCounts(): Promise<TrainingDataCountsResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/extract/training-data`);
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Failed to fetch training data counts: ${response.status} ${text}`);
   }
   return response.json();
 }
@@ -149,7 +176,8 @@ export interface TrainingTaskStatus {
   status: 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled' | 'not_found';
   task_type?: string;
   progress?: { evaluated: number; total_planned: number };
-  results?: Record<string, unknown>;
+  /** Includes train_samples, test_samples when present (box detector training). */
+  results?: Record<string, unknown> & { train_samples?: number; test_samples?: number };
   latest_eval?: EvaluateResponse;
   latest_preview?: TrainingPreviewResponse;
   /** Expected duration in ms for next preview (test set size * ms per image). */

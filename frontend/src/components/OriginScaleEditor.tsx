@@ -20,15 +20,19 @@ export interface OriginScaleEditorProps {
   showSaveOriginButton?: boolean;
   /** When true, show the augmentation preview section (Configuration tab only). */
   showAugmentPreview?: boolean;
+  /** Called after origin is saved successfully; e.g. parent can refetch training data counts. */
+  onOriginSaved?: () => void;
 }
 
 export function OriginScaleEditor({
   showScaleInput = true,
   showSaveOriginButton = true,
   showAugmentPreview = false,
+  onOriginSaved,
 }: OriginScaleEditorProps) {
   const [imageType, setImageType] = useState<ImageType>('regular');
   const [filenames, setFilenames] = useState<string[]>([]);
+  const [hasOriginSet, setHasOriginSet] = useState<Set<string>>(new Set());
   const [selectedFilename, setSelectedFilename] = useState<string | null>(null);
   const [originX, setOriginX] = useState<number>(0);
   const [originY, setOriginY] = useState<number>(0);
@@ -59,11 +63,12 @@ export function OriginScaleEditor({
     const subdir =
       imageType === 'blueprint' ? EXTRACT_SUBDIRS.blueprint : EXTRACT_SUBDIRS.regular;
     try {
-      const { filenames: list } = await listScreenshots(subdir);
-      setFilenames(list);
-      if (list.length > 0) {
+      const res = await listScreenshots(subdir);
+      setFilenames(res.filenames);
+      setHasOriginSet(new Set(res.has_origin ?? []));
+      if (res.filenames.length > 0) {
         setSelectedFilename((prev) =>
-          prev && list.includes(prev) ? prev : list[0]
+          prev && res.filenames.includes(prev) ? prev : res.filenames[0]
         );
       } else {
         setSelectedFilename(null);
@@ -71,6 +76,7 @@ export function OriginScaleEditor({
     } catch (e) {
       console.error('Failed to list screenshots', e);
       setFilenames([]);
+      setHasOriginSet(new Set());
       setSelectedFilename(null);
     }
   }, [imageType]);
@@ -178,11 +184,13 @@ export function OriginScaleEditor({
     try {
       await saveOrigin(selectedFilename, screenshotSubdir, originX, originY);
       setSaveStatus('success');
+      await loadScreenshots();
+      onOriginSaved?.();
     } catch (e) {
       setSaveStatus('error');
       setSaveErrorMessage(e instanceof Error ? e.message : 'Failed to save origin');
     }
-  }, [selectedFilename, screenshotSubdir, originX, originY]);
+  }, [selectedFilename, screenshotSubdir, originX, originY, loadScreenshots, onOriginSaved]);
 
   useEffect(() => {
     if (saveStatus === null) return;
@@ -197,6 +205,7 @@ export function OriginScaleEditor({
     screenshotSubdir === EXTRACT_SUBDIRS.regular ||
     screenshotSubdir === EXTRACT_SUBDIRS.blueprint;
   const canSaveOrigin = isLabeledSubdir && selectedFilename != null;
+  const showLabelBadges = isLabeledSubdir && filenames.length > 0;
 
   const imageUrl = selectedFilename
     ? getScreenshotUrl(selectedFilename, screenshotSubdir)
@@ -238,21 +247,47 @@ export function OriginScaleEditor({
               <option value="blueprint">Blueprint</option>
             </select>
           </label>
-          <label className="extract-config-form-label">
-            Screenshot
-            <select
-              value={selectedFilename ?? ''}
-              onChange={(e) => setSelectedFilename(e.target.value || null)}
-              className="extract-config-select"
+          <div className="extract-config-form-label">
+            <span className="extract-config-screenshot-label">Screenshot</span>
+            {showLabelBadges && (
+              <p className="extract-config-screenshot-summary" aria-live="polite">
+                {hasOriginSet.size} of {filenames.length} images have coordinates
+              </p>
+            )}
+            <div
+              className="extract-config-screenshot-list"
+              role="listbox"
+              aria-label="Screenshot"
+              tabIndex={0}
             >
-              {filenames.length === 0 && <option value="">No screenshots</option>}
+              {filenames.length === 0 && (
+                <p className="extract-config-no-screenshots-option">No screenshots</p>
+              )}
               {filenames.map((f) => (
-                <option key={f} value={f}>
-                  {f}
-                </option>
+                <button
+                  key={f}
+                  type="button"
+                  role="option"
+                  aria-selected={selectedFilename === f}
+                  className={`extract-config-screenshot-row ${selectedFilename === f ? 'extract-config-screenshot-row-selected' : ''}`}
+                  onClick={() => setSelectedFilename(f)}
+                >
+                  <span className="extract-config-screenshot-filename">{f}</span>
+                  {showLabelBadges && (
+                    <span
+                      className={
+                        hasOriginSet.has(f)
+                          ? 'extract-config-screenshot-badge extract-config-screenshot-badge-labeled'
+                          : 'extract-config-screenshot-badge extract-config-screenshot-badge-needs'
+                      }
+                    >
+                      {hasOriginSet.has(f) ? 'Labeled' : 'Needs coordinates'}
+                    </span>
+                  )}
+                </button>
               ))}
-            </select>
-          </label>
+            </div>
+          </div>
           <label className="extract-config-form-label">
             Origin X (px)
             <input

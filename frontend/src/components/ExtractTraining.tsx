@@ -4,10 +4,12 @@ import {
   stopTraining,
   getTrainingTaskStatus,
   getExtractConfig,
+  getTrainingDataCounts,
   type TrainingTaskStatus,
   type EvaluateResponse,
   type TrainingPreviewResponse,
   type ExtractConfigResponse,
+  type TrainingDataCountsResponse,
 } from '../api/extract';
 import { OriginScaleEditor } from './OriginScaleEditor';
 import { TrainingPreview } from './TrainingPreview';
@@ -71,6 +73,7 @@ export function ExtractTraining() {
   const [latestPreview, setLatestPreview] = useState<TrainingPreviewResponse | null>(null);
   const [previewWaitStart, setPreviewWaitStart] = useState<number | null>(null);
   const [circleProgress, setCircleProgress] = useState(0);
+  const [trainingDataCounts, setTrainingDataCounts] = useState<TrainingDataCountsResponse | null>(null);
   const trainingPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const prevEvalKeyRef = useRef<string | null>(null);
   const lastEpochWithPreviewRef = useRef<number>(-1);
@@ -80,6 +83,16 @@ export function ExtractTraining() {
   useEffect(() => {
     getExtractConfig().then(setExtractConfig).catch(() => {});
   }, []);
+
+  const loadTrainingDataCounts = useCallback(() => {
+    getTrainingDataCounts().then(setTrainingDataCounts).catch(() => setTrainingDataCounts(null));
+  }, []);
+
+  useEffect(() => {
+    if (modelSubTab === 'box_detector') {
+      loadTrainingDataCounts();
+    }
+  }, [modelSubTab, loadTrainingDataCounts]);
 
   const handleStartTraining = useCallback(async () => {
     setTrainingError(null);
@@ -239,6 +252,7 @@ export function ExtractTraining() {
               showScaleInput={false}
               showSaveOriginButton={true}
               showAugmentPreview={false}
+              onOriginSaved={loadTrainingDataCounts}
             />
           )}
           {(modelSubTab === 'digit' || modelSubTab === 'type') && (
@@ -247,6 +261,18 @@ export function ExtractTraining() {
         </div>
         <div className="extract-config-training-right">
           <p className="stat-section-label">Training</p>
+          {modelSubTab === 'box_detector' && trainingDataCounts !== null && (
+            <div className="extract-config-training-data-block" role="status">
+              <p className="extract-config-training-data-summary">
+                <strong>{trainingDataCounts.total}</strong> source images ready for training
+                {' '}({trainingDataCounts.regular} regular, {trainingDataCounts.blueprint} blueprint)
+              </p>
+              <p className="extract-config-training-data-augmented">
+                ×{trainingDataCounts.augment_count} augmentation → up to{' '}
+                <strong>{trainingDataCounts.augmented_samples_per_epoch_max}</strong> augmented samples per epoch
+              </p>
+            </div>
+          )}
           <div className="extract-config-training-actions">
             <button
               type="button"
@@ -273,6 +299,9 @@ export function ExtractTraining() {
           {trainingStatus === 'processing' && trainingProgress && (
             <p className="extract-config-training-status" role="status">
               Epoch {trainingProgress.evaluated} / {trainingProgress.total_planned}
+              {trainingResults && typeof trainingResults.train_samples === 'number' && typeof trainingResults.test_samples === 'number' && (
+                <> — Train: {Number(trainingResults.train_samples)}, Test: {Number(trainingResults.test_samples)} samples</>
+              )}
               {trainingResults && typeof trainingResults.loss === 'number' && (
                 <> — loss: {Number(trainingResults.loss).toFixed(4)}</>
               )}
@@ -284,6 +313,11 @@ export function ExtractTraining() {
           {trainingStatus === 'completed' && trainingResults && (
             <div className="extract-config-training-results" role="status">
               <p className="stat-section-label">Last run</p>
+              {typeof trainingResults.train_samples === 'number' && typeof trainingResults.test_samples === 'number' && (
+                <p className="extract-config-training-samples">
+                  Train: {Number(trainingResults.train_samples)}, Test: {Number(trainingResults.test_samples)} samples
+                </p>
+              )}
               <ul>
                 {typeof trainingResults.test_mae_x === 'number' && (
                   <li>Test MAE X: {trainingResults.test_mae_x.toFixed(4)}</li>

@@ -134,6 +134,7 @@ async def get_extract_config():
         "augment_shift_regular": config.EXTRACT_AUGMENT_SHIFT_REGULAR,
         "augment_shift_blueprint": config.EXTRACT_AUGMENT_SHIFT_BLUEPRINT,
         "augment_fill": config.EXTRACT_AUGMENT_FILL,
+        "augment_count": config.EXTRACT_AUGMENT_COUNT,
         "preview_every_n_epochs": config.PREVIEW_EVERY_N_EPOCHS,
         "preview_expected_duration_ms": config.PREVIEW_EXPECTED_DURATION_MS,
     }
@@ -175,6 +176,40 @@ async def save_origin(body: SaveOriginRequest):
     return {"ok": True, "path": str(txt_path.relative_to(_data_dir()))}
 
 
+def _labeled_counts_for_subdir(base: Path) -> list[str]:
+    """Return sorted list of image filenames that have a companion .txt (origin) in base."""
+    if not base.exists():
+        return []
+    has_origin = []
+    for p in base.iterdir():
+        if p.suffix.lower() in (".png", ".jpg", ".jpeg") and (p.with_suffix(".txt")).exists():
+            has_origin.append(p.name)
+    return sorted(has_origin)
+
+
+@router.get("/api/extract/training-data")
+async def get_training_data():
+    """
+    Return counts of labeled screenshots (source images with companion .txt) per subdir,
+    plus augmentation config so the frontend can show how many augmented samples
+    are used. Each source image is expanded to augment_count samples per epoch.
+    """
+    data_dir = _data_dir()
+    regular_dir = data_dir / "labeled" / "screenshots" / "regular"
+    blueprint_dir = data_dir / "labeled" / "screenshots" / "blueprint"
+    regular_count = len(_labeled_counts_for_subdir(regular_dir))
+    blueprint_count = len(_labeled_counts_for_subdir(blueprint_dir))
+    total_sources = regular_count + blueprint_count
+    augment_count = config.EXTRACT_AUGMENT_COUNT
+    return {
+        "total": total_sources,
+        "regular": regular_count,
+        "blueprint": blueprint_count,
+        "augment_count": augment_count,
+        "augmented_samples_per_epoch_max": total_sources * augment_count,
+    }
+
+
 @router.get("/api/extract/screenshots")
 async def list_screenshots(
     subdir: str = "unlabeled/screenshots",
@@ -191,11 +226,20 @@ async def list_screenshots(
         raise HTTPException(status_code=400, detail="Invalid subdir")
     base = _data_dir() / subdir
     if not base.exists():
-        return {"filenames": []}
+        out = {"filenames": []}
+        if subdir in LABELED_SCREENSHOT_SUBDIRS_WRITABLE:
+            out["has_origin"] = []
+        return out
     filenames = sorted(
         p.name for p in base.iterdir() if p.suffix.lower() in (".png", ".jpg", ".jpeg")
     )
-    return {"filenames": filenames}
+    out = {"filenames": filenames}
+    if subdir in LABELED_SCREENSHOT_SUBDIRS_WRITABLE:
+        out["has_origin"] = [
+            name for name in filenames
+            if (base / name).with_suffix(".txt").exists()
+        ]
+    return out
 
 
 @router.get("/api/extract/screenshots/{filename}")
