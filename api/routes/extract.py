@@ -1,4 +1,4 @@
-"""Extract pipeline endpoints: screenshots and region boxes."""
+"""Extract pipeline endpoints: screenshots, region boxes, and box detector training."""
 
 import logging
 from pathlib import Path
@@ -8,12 +8,14 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from api.config import Config
+from api.services.task_service import TaskService
 from shared.extract_regions import compute_boxes
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 config = Config()
+task_service = TaskService()
 
 # Allowed subdirs under DATA_DIR for listing/serving (path traversal protection)
 ALLOWED_SCREENSHOT_SUBDIRS = (
@@ -31,10 +33,14 @@ LABELED_SCREENSHOT_SUBDIRS_WRITABLE = (
 )
 
 
+def _repo_root() -> Path:
+    """Return absolute path to repo root."""
+    return Path(__file__).resolve().parent.parent.parent
+
+
 def _data_dir() -> Path:
     """Return absolute path to data directory (relative to repo root)."""
-    repo_root = Path(__file__).resolve().parent.parent.parent
-    return (repo_root / config.DATA_DIR).resolve()
+    return (_repo_root() / config.DATA_DIR).resolve()
 
 
 def _screenshot_path(filename: str, subdir: str = "unlabeled/screenshots") -> Path:
@@ -177,3 +183,95 @@ async def post_boxes(body: BoxesRequest):
         image_type=body.image_type,
     )
     return {"boxes": boxes}
+
+
+class TrainingStartRequest(BaseModel):
+    """Request body for POST /api/extract/training/start."""
+
+    model_type: str = "box_detector"
+
+
+@router.post("/api/extract/training/start")
+async def training_start(body: TrainingStartRequest | None = None):
+    """
+    Start a box detector training task. Returns task_id to poll via GET /api/tasks/{task_id}.
+    Body is optional; default model_type is box_detector.
+    """
+    model_type = (body.model_type if body is not None else "box_detector") or "box_detector"
+    if model_type != "box_detector":
+        raise HTTPException(status_code=400, detail="Only model_type 'box_detector' is supported")
+    try:
+        task_id = task_service.create_training_task(model_type=model_type)
+    except Exception as e:
+        logger.exception("Failed to create training task")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    return {"task_id": task_id, "status": "pending"}
+
+
+@router.post("/api/extract/training/stop")
+async def training_stop():
+    """Cancel the current training task, if any."""
+    cancelled = task_service.cancel_training_task()
+    return {"ok": True, "cancelled": cancelled, "message": "Training cancel requested" if cancelled else "No training task was running"}
+
+
+@router.get("/api/extract/training/evaluate")
+async def training_evaluate():
+    """
+    Evaluate the saved box detector model on the test set (same split logic as training).
+    Returns test metrics. 404 if no model exists.
+    """
+    from task.processors.box_detector_processor import (
+        _build_arrays,
+        _compute_test_metrics,
+        _labeled_dirs,
+        _scan_sources,
+        _split_train_test,
+    )
+
+    # Processor saves with .keras extension; support both for backwards compatibility
+    model_path = _repo_root() / config.BOX_DETECTOR_MODEL_PATH
+    load_path = (
+        model_path
+        if model_path.exists()
+        else Path(str(model_path) + ".keras")
+    )
+    if not load_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="Box detector model not found. Run training first.",
+        )
+
+    data_dir = _data_dir()
+    labeled = _labeled_dirs(data_dir)
+    if not labeled:
+        raise HTTPException(
+            status_code=400,
+            detail="No labeled screenshots found.",
+        )
+    sources = _scan_sources(labeled)
+    if not sources:
+        raise HTTPException(
+            status_code=400,
+            detail="No valid (image, .txt) pairs found.",
+        )
+    _, test_sources = _split_train_test(sources, config.BOX_DETECTOR_TEST_RATIO)
+    if not test_sources:
+        raise HTTPException(
+            status_code=400,
+            detail="No test set after split.",
+        )
+
+    X_test, y_test = _build_arrays(
+        test_sources,
+        augment=False,
+        shift_regular=config.EXTRACT_AUGMENT_SHIFT_REGULAR,
+        shift_blueprint=config.EXTRACT_AUGMENT_SHIFT_BLUEPRINT,
+        fill_mode=config.EXTRACT_AUGMENT_FILL,
+        augment_count=config.EXTRACT_AUGMENT_COUNT,
+    )
+
+    from tensorflow import keras
+    model = keras.models.load_model(str(load_path))
+    metrics = _compute_test_metrics(model, X_test, y_test)
+    return metrics

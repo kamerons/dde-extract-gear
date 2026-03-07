@@ -4,13 +4,26 @@ import json
 import logging
 import signal
 import sys
+import threading
 import time
+from pathlib import Path
 from typing import Dict, Optional
 
 import redis
 from task.config import Config
 from task.processors.recommendation_processor import RecommendationProcessor
+from task.processors.box_detector_processor import (
+    BoxDetectorProcessor,
+    _build_arrays,
+    _compute_test_metrics,
+    _labeled_dirs,
+    _scan_sources,
+    _split_train_test,
+)
 from shared.recommendation_engine import TaskCancelledError
+
+EVAL_INTERVAL_SEC = 10
+EVAL_THREAD_JOIN_TIMEOUT_SEC = 15
 
 # Configure logging
 logging.basicConfig(
@@ -21,10 +34,12 @@ logger = logging.getLogger(__name__)
 
 
 class TaskWorker:
-    """Worker that processes tasks from Redis queue. Only one task runs at a time."""
+    """Worker that processes tasks from Redis queues. Only one task runs at a time."""
 
     QUEUE_NAME = "recommendation_tasks"
     CURRENT_TASK_KEY = "recommendation_current_task_id"
+    TRAINING_QUEUE_NAME = "training_tasks"
+    TRAINING_CURRENT_TASK_KEY = "training_current_task_id"
     CURRENT_TASK_EXPIRY = 3600  # seconds (clears if worker dies)
     POLL_INTERVAL = 1.0  # seconds
 
@@ -39,6 +54,16 @@ class TaskWorker:
             decode_responses=True
         )
         self.processor = RecommendationProcessor(self.config.DATA_FILE_PATH)
+        self.training_processor = BoxDetectorProcessor(
+            data_dir=self.config.DATA_DIR,
+            model_path=self.config.BOX_DETECTOR_MODEL_PATH,
+            test_ratio=self.config.BOX_DETECTOR_TEST_RATIO,
+            epochs=self.config.TRAINING_EPOCHS,
+            augment_shift_regular=self.config.EXTRACT_AUGMENT_SHIFT_REGULAR,
+            augment_shift_blueprint=self.config.EXTRACT_AUGMENT_SHIFT_BLUEPRINT,
+            augment_fill=self.config.EXTRACT_AUGMENT_FILL,
+            augment_count=self.config.EXTRACT_AUGMENT_COUNT,
+        )
         self.running = False
 
     def update_task_status(
@@ -113,12 +138,154 @@ class TaskWorker:
                 json.dumps(partial_results)
             )
 
-    def _clear_current_task(self) -> None:
+    def _clear_current_task(self, current_key: str) -> None:
         """Clear the current-processing task id in Redis."""
         try:
-            self.redis_client.delete(self.CURRENT_TASK_KEY)
+            self.redis_client.delete(current_key)
         except Exception as e:
             logger.warning(f"Failed to clear current task key: {e}")
+
+    def _eval_loop(
+        self,
+        stop_event: threading.Event,
+        task_id: str,
+        repo_root: Path,
+    ) -> None:
+        """Background thread: every 10s load current model and write test metrics to Redis."""
+        from tensorflow import keras
+
+        config = self.config
+        # Match processor: current checkpoint is saved with .keras extension
+        current_path = repo_root / (config.BOX_DETECTOR_MODEL_PATH + "_current.keras")
+        data_dir = repo_root / config.DATA_DIR
+
+        while True:
+            if stop_event.wait(timeout=EVAL_INTERVAL_SEC):
+                break
+            if not current_path.exists():
+                continue
+            try:
+                model = keras.models.load_model(str(current_path))
+            except Exception as e:
+                logger.debug("Eval thread skip load: %s", e)
+                continue
+            try:
+                labeled = _labeled_dirs(data_dir)
+                if not labeled:
+                    continue
+                sources = _scan_sources(labeled)
+                if not sources:
+                    continue
+                _, test_sources = _split_train_test(
+                    sources, config.BOX_DETECTOR_TEST_RATIO
+                )
+                if not test_sources:
+                    continue
+                X_test, y_test = _build_arrays(
+                    test_sources,
+                    augment=False,
+                    shift_regular=config.EXTRACT_AUGMENT_SHIFT_REGULAR,
+                    shift_blueprint=config.EXTRACT_AUGMENT_SHIFT_BLUEPRINT,
+                    fill_mode=config.EXTRACT_AUGMENT_FILL,
+                    augment_count=config.EXTRACT_AUGMENT_COUNT,
+                )
+                metrics = _compute_test_metrics(model, X_test, y_test)
+                self.redis_client.setex(
+                    f"task:{task_id}:eval",
+                    3600,
+                    json.dumps(metrics),
+                )
+            except Exception as e:
+                logger.debug("Eval thread skip: %s", e)
+
+    def process_training_task(self, task_data: Dict) -> None:
+        """Process a single training task (e.g. box detector)."""
+        task_id = task_data["task_id"]
+        model_type = task_data.get("model_type", "box_detector")
+
+        logger.info(f"Processing training task {task_id} (model_type={model_type})")
+
+        self.redis_client.setex(
+            self.TRAINING_CURRENT_TASK_KEY,
+            self.CURRENT_TASK_EXPIRY,
+            task_id
+        )
+        self.redis_client.hset(
+            f"task:{task_id}:meta",
+            mapping={"status": "processing", "task_type": "training"}
+        )
+
+        def progress_callback(epoch: int, total_epochs: int, metrics: Dict) -> None:
+            self.update_task_progress(
+                task_id,
+                evaluated=epoch,
+                total_planned=total_epochs,
+                partial_results=metrics
+            )
+
+        def check_cancelled() -> bool:
+            cancelled = self.redis_client.get(f"task:{task_id}:cancelled")
+            return cancelled == "1"
+
+        stop_eval_event = threading.Event()
+        eval_thread: Optional[threading.Thread] = None
+        repo_root = Path(__file__).resolve().parent.parent
+
+        if model_type == "box_detector":
+            eval_thread = threading.Thread(
+                target=self._eval_loop,
+                args=(stop_eval_event, task_id, repo_root),
+                daemon=False,
+            )
+            eval_thread.start()
+
+        try:
+            if model_type == "box_detector":
+                results = self.training_processor.process(
+                    task_id=task_id,
+                    progress_callback=progress_callback,
+                    check_cancelled=check_cancelled,
+                )
+            else:
+                self._clear_current_task(self.TRAINING_CURRENT_TASK_KEY)
+                self.update_task_status(
+                    task_id, "failed",
+                    error=f"Unknown model_type: {model_type}"
+                )
+                return
+
+            if "error" in results:
+                self._clear_current_task(self.TRAINING_CURRENT_TASK_KEY)
+                self.update_task_status(
+                    task_id, "failed",
+                    error=results.get("message", results.get("error", "Unknown error"))
+                )
+                return
+
+            self._clear_current_task(self.TRAINING_CURRENT_TASK_KEY)
+            self.update_task_status(task_id, "completed", results=results)
+            logger.info(f"Completed training task {task_id}")
+
+        except TaskCancelledError:
+            self._clear_current_task(self.TRAINING_CURRENT_TASK_KEY)
+            self.update_task_status(
+                task_id, "cancelled",
+                error="Training cancelled"
+            )
+            logger.info(f"Training task {task_id} was cancelled")
+
+        except Exception as e:
+            self._clear_current_task(self.TRAINING_CURRENT_TASK_KEY)
+            error_msg = str(e)
+            logger.error(f"Failed to process training task {task_id}: {error_msg}")
+            self.update_task_status(task_id, "failed", error=error_msg)
+
+        finally:
+            if eval_thread is not None:
+                stop_eval_event.set()
+                eval_thread.join(timeout=EVAL_THREAD_JOIN_TIMEOUT_SEC)
+                if eval_thread.is_alive():
+                    logger.warning("Eval thread did not stop within timeout")
 
     def process_task(self, task_data: Dict) -> None:
         """
@@ -132,7 +299,7 @@ class TaskWorker:
 
         logger.info(f"Processing task {task_id}")
 
-        # Claim as the current processing task (so API can cancel it when a new one is created)
+        # Claim as the current recommendation task (so API can cancel it when a new one is created)
         self.redis_client.setex(
             self.CURRENT_TASK_KEY,
             self.CURRENT_TASK_EXPIRY,
@@ -167,17 +334,17 @@ class TaskWorker:
                 check_cancelled=check_cancelled
             )
 
-            self._clear_current_task()
+            self._clear_current_task(self.CURRENT_TASK_KEY)
             self.update_task_status(task_id, "completed", results=results)
             logger.info(f"Completed task {task_id}")
 
         except TaskCancelledError:
-            self._clear_current_task()
+            self._clear_current_task(self.CURRENT_TASK_KEY)
             self.update_task_status(task_id, "cancelled", error="Cancelled (a new task was started)")
             logger.info(f"Task {task_id} was cancelled")
 
         except Exception as e:
-            self._clear_current_task()
+            self._clear_current_task(self.CURRENT_TASK_KEY)
             error_msg = str(e)
             logger.error(f"Failed to process task {task_id}: {error_msg}")
             self.update_task_status(task_id, "failed", error=error_msg)
@@ -205,22 +372,22 @@ class TaskWorker:
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)
 
-        # Main loop
+        # Main loop: listen to both training and recommendation queues
         while self.running:
             try:
-                # Blocking pop from queue (wait up to POLL_INTERVAL seconds)
                 task_data_str = self.redis_client.brpop(
-                    self.QUEUE_NAME,
+                    [self.TRAINING_QUEUE_NAME, self.QUEUE_NAME],
                     timeout=int(self.POLL_INTERVAL)
                 )
 
                 if task_data_str:
-                    # task_data_str is a tuple: (queue_name, data)
-                    _, data = task_data_str
+                    queue_name, data = task_data_str
                     task_data = json.loads(data)
-                    self.process_task(task_data)
+                    if queue_name == self.TRAINING_QUEUE_NAME:
+                        self.process_training_task(task_data)
+                    else:
+                        self.process_task(task_data)
                 else:
-                    # Timeout - continue loop to check if still running
                     continue
 
             except redis.ConnectionError as e:

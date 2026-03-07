@@ -128,3 +128,89 @@ export async function fetchBoxes(
   }
   return response.json();
 }
+
+// --- Box detector training ---
+
+export interface TrainingStartResponse {
+  task_id: string;
+  status: string;
+}
+
+export interface TrainingStopResponse {
+  ok: boolean;
+  cancelled: boolean;
+  message: string;
+}
+
+export interface TrainingTaskStatus {
+  task_id: string;
+  status: 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled' | 'not_found';
+  task_type?: string;
+  progress?: { evaluated: number; total_planned: number };
+  results?: Record<string, number | string>;
+  latest_eval?: EvaluateResponse;
+  error?: string;
+}
+
+export interface EvaluateResponse {
+  test_mae_x: number;
+  test_mae_y: number;
+  accuracy_within_5px: number;
+}
+
+/**
+ * Start a box detector training task. Poll with getTrainingTaskStatus(task_id).
+ */
+export async function startTraining(): Promise<TrainingStartResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/extract/training/start`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model_type: 'box_detector' }),
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Failed to start training: ${response.status} ${text}`);
+  }
+  return response.json();
+}
+
+/**
+ * Request cancellation of the current training task.
+ */
+export async function stopTraining(): Promise<TrainingStopResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/extract/training/stop`, {
+    method: 'POST',
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Failed to stop training: ${response.status} ${text}`);
+  }
+  return response.json();
+}
+
+/**
+ * Get status of any task (recommendation or training) by ID.
+ */
+export async function getTrainingTaskStatus(taskId: string): Promise<TrainingTaskStatus> {
+  const response = await fetch(`${API_BASE_URL}/api/tasks/${taskId}`);
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Failed to get task status: ${response.status} ${text}`);
+  }
+  return response.json();
+}
+
+/**
+ * Evaluate the saved box detector model on the test set. Throws if no model (404).
+ */
+export async function evaluateModel(): Promise<EvaluateResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/extract/training/evaluate`);
+  if (response.status === 404) {
+    throw new Error('No box detector model found. Run training first.');
+  }
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Failed to evaluate: ${response.status} ${text}`);
+  }
+  return response.json();
+}

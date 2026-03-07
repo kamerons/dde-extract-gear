@@ -16,9 +16,8 @@ This document outlines the architecture for moving from fake armor data to real 
 - A neural network takes a **full screenshot** and outputs the **top-left** of the gear/card box only. That top-left is **not** stored in config; it is computed at inference time by the model.
 - Screenshot **type** (regular vs blueprint) is **not** predicted by the model; it is known from labeling (e.g. by placing images in `labeled/screenshots/regular/` or `labeled/screenshots/blueprint/` per [shared/DATA_LAYOUT.md](shared/DATA_LAYOUT.md)).
 - Box dimensions and region layout are derived from config. The only values stored for extract layout are **two scale factors**: one for regular screenshots and one for blueprint (e.g. `EXTRACT_REGULAR_SCALE`, `EXTRACT_BLUEPRINT_SCALE` in .env). The front-end config UI lets users tune these so region overlays align; users copy the values into .env manually.
-- Training uses a **limited initial labeled set** plus **ongoing labels from the front-end**; labeling and training happen in the same workflow.
-- **Augmentation**: small translations of the image during training.
-- A defined portion of labeled data is **reserved as a test set**.
+- Training uses a **limited initial labeled set** plus **ongoing labels from the front-end**. As the front-end labels more data, that data is **added to the training that is already taking place**: the training task re-scans the labeled directories at the start of each epoch and includes any new (image, .txt) pairs in the training set. Augmentation (small translations + fill) is applied **in-process during training**; there is no separate augmentation script. A defined portion of labeled data is **reserved as a test set** (fixed at run start so metrics are comparable).
+- The **box detector** is the first implemented model; stat-type and stat-value classifiers will be added later.
 
 ### 3. Two image classifiers
 
@@ -38,7 +37,7 @@ All paths for unlabeled screenshots, labeled screenshots (with box coordinates),
 
 ## Interactive labeling
 
-Labels and corrections are provided from the **front-end**. The API persists them into the `data/labeled/` tree. As more data is added, training can be re-run (e.g. by enqueueing a training task). The system is designed so that labeling and training can proceed in parallel over time.
+Labels and corrections are provided from the **front-end**. The API persists them into the `data/labeled/` tree. The user starts a training task from the Extract config UI; that task runs for a fixed number of epochs and re-scans the labeled dirs each epoch so new labels are included in the current run. Training can be stopped at any time via the API; the current model can be evaluated against the test set on demand.
 
 ## Pipeline flow (high level)
 

@@ -866,6 +866,54 @@
   font-size: 0.9rem;
 }
 
+.extract-config-training {
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid #e0e0e0;
+}
+
+.extract-config-training-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.extract-config-stop-button {
+  padding: 0.5rem 1rem;
+  font-size: 0.95rem;
+  border: 1px solid #c00;
+  border-radius: 6px;
+  background: #fff5f5;
+  color: #a00;
+  cursor: pointer;
+}
+
+.extract-config-stop-button:hover:not(:disabled) {
+  background: #ffe8e8;
+}
+
+.extract-config-stop-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.extract-config-training-status {
+  margin: 0.5rem 0;
+  font-size: 0.95rem;
+}
+
+.extract-config-training-results,
+.extract-config-evaluate-results {
+  margin-top: 0.75rem;
+}
+
+.extract-config-training-results ul,
+.extract-config-evaluate-results ul {
+  margin: 0.25rem 0 0 1rem;
+  padding: 0;
+}
+
 .extract-config-augment-section {
   margin-top: 1.5rem;
   padding-top: 1rem;

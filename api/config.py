@@ -43,6 +43,19 @@ class Config:
         v = self._augment_fill_raw
         return v if v in ("black", "noise") else "black"
 
+    EXTRACT_AUGMENT_COUNT: int = max(
+        1, min(int(os.getenv("EXTRACT_AUGMENT_COUNT", "3")), 100)
+    )
+
+    # Box detector training
+    BOX_DETECTOR_TEST_RATIO: float = float(
+        os.getenv("BOX_DETECTOR_TEST_RATIO", "0.2")
+    )
+    BOX_DETECTOR_MODEL_PATH: str = os.getenv(
+        "BOX_DETECTOR_MODEL_PATH", "data/box_detector_model"
+    )
+    TRAINING_EPOCHS: int = max(1, int(os.getenv("TRAINING_EPOCHS", "50")))
+
     @property
     def redis_url(self) -> str:
         """Get Redis connection URL."""
