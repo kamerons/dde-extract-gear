@@ -12,7 +12,7 @@ import tempfile
 import zipfile
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 import numpy as np
 from PIL import Image
@@ -256,15 +256,26 @@ def _load_existing_model(load_path: Path):
 def _compute_test_metrics(model, X_test: np.ndarray, y_test: np.ndarray) -> dict:
     """Predict on test set; scale back to pixel space and compute MAE (in input 256 space for simplicity)."""
     if len(X_test) == 0:
-        return {"test_mae_x": 0.0, "test_mae_y": 0.0, "accuracy_within_5px": 0.0}
+        return {
+            "test_mae_x": 0.0,
+            "test_mae_y": 0.0,
+            "accuracy_within_15px": 0.0,
+            "accuracy_within_5px": 0.0,
+            "accuracy_within_3px": 0.0,
+        }
     pred = model.predict(X_test, verbose=0)
     mae_x = float(np.mean(np.abs(pred[:, 0] - y_test[:, 0])))
     mae_y = float(np.mean(np.abs(pred[:, 1] - y_test[:, 1])))
-    within_5 = np.sum((np.abs(pred - y_test) <= 5).all(axis=1)) / len(y_test)
+    n = len(y_test)
+    within_15 = np.sum((np.abs(pred - y_test) <= 15).all(axis=1)) / n
+    within_5 = np.sum((np.abs(pred - y_test) <= 5).all(axis=1)) / n
+    within_3 = np.sum((np.abs(pred - y_test) <= 3).all(axis=1)) / n
     return {
         "test_mae_x": round(mae_x, 4),
         "test_mae_y": round(mae_y, 4),
+        "accuracy_within_15px": round(float(within_15), 4),
         "accuracy_within_5px": round(float(within_5), 4),
+        "accuracy_within_3px": round(float(within_3), 4),
     }
 
 
@@ -284,12 +295,14 @@ class BoxDetectorProcessor:
         test_blueprint_fraction: float = 0.5,
         scale_regular: float = 1.0,
         scale_blueprint: float = 1.0,
+        preview_every_n_epochs: int = 20,
     ):
         self.data_dir = Path(data_dir) if not isinstance(data_dir, Path) else data_dir
         self.model_path = model_path
         self.test_ratio = test_ratio
         self.test_blueprint_fraction = test_blueprint_fraction
         self.epochs = epochs
+        self.preview_every_n_epochs = preview_every_n_epochs
         self.augment_shift_regular = augment_shift_regular
         self.augment_shift_blueprint = augment_shift_blueprint
         self.augment_fill = augment_fill
@@ -303,6 +316,7 @@ class BoxDetectorProcessor:
         self,
         task_id: str,
         progress_callback: Optional[Callable[[int, int, dict], None]] = None,
+        preview_callback: Optional[Callable[[int, dict, dict], None]] = None,
         check_cancelled: Optional[Callable[[], bool]] = None,
         resume_from_existing: bool = False,
     ) -> dict:
@@ -399,6 +413,7 @@ class BoxDetectorProcessor:
             hist = model.fit(
                 X_train, y_train,
                 epochs=1,
+                batch_size=16,
                 validation_data=validation_data,
                 verbose=0,
             )
@@ -421,6 +436,34 @@ class BoxDetectorProcessor:
             if progress_callback:
                 progress_callback(epoch, self.epochs, metrics)
 
+            # At preview epochs: build preview and notify (eval/preview only when configured interval has passed)
+            if (
+                self.preview_every_n_epochs > 0
+                and epoch % self.preview_every_n_epochs == 0
+                and epoch > 0
+                and preview_callback
+            ):
+                try:
+                    from task.processors.evaluation_processor import build_preview_items
+                    items, scale_regular_out, scale_blueprint_out = build_preview_items(
+                        model,
+                        test_sources,
+                        self.scale_regular,
+                        self.scale_blueprint,
+                        self.augment_shift_regular,
+                        self.augment_shift_blueprint,
+                        self.augment_fill,
+                        self.augment_count,
+                    )
+                    preview_payload: dict[str, Any] = {
+                        "items": items,
+                        "scale_regular": scale_regular_out,
+                        "scale_blueprint": scale_blueprint_out,
+                    }
+                    preview_callback(epoch, metrics, preview_payload)
+                except Exception as e:
+                    logger.warning("Preview at epoch %d failed: %s", epoch, e)
+
             # 100% test accuracy: save model and quit
             if metrics.get("accuracy_within_5px", 0) >= 1.0:
                 timestamped_name = stem + "_" + datetime.now().strftime("%Y%m%d_%H%M%S") + ".keras"
@@ -435,8 +478,11 @@ class BoxDetectorProcessor:
                 out_metrics["stopped_early_100"] = True
                 return out_metrics
 
-            # Save checkpoint every 10 epochs (and on last epoch) so eval thread can load it
-            save_checkpoint = (epoch % 10 == 0) or (epoch == self.epochs)
+            # Save checkpoint at preview epochs and on last epoch
+            save_checkpoint = (
+                (self.preview_every_n_epochs > 0 and epoch % self.preview_every_n_epochs == 0)
+                or (epoch == self.epochs)
+            )
             if save_checkpoint:
                 current_path = save_dir / (stem + "_current.keras")
                 logger.info("Saving checkpoint to %s", current_path)
@@ -479,4 +525,26 @@ class BoxDetectorProcessor:
         final_metrics = _compute_test_metrics(model, X_test_final, y_test_final)
         final_metrics["epochs"] = self.epochs
         final_metrics["status"] = "completed"
+
+        # Build final preview in-process so the worker does not re-run the test set
+        try:
+            from task.processors.evaluation_processor import build_preview_items
+            items, scale_regular_out, scale_blueprint_out = build_preview_items(
+                model,
+                test_sources_final,
+                self.scale_regular,
+                self.scale_blueprint,
+                self.augment_shift_regular,
+                self.augment_shift_blueprint,
+                self.augment_fill,
+                self.augment_count,
+            )
+            final_metrics["final_preview"] = {
+                "items": items,
+                "scale_regular": scale_regular_out,
+                "scale_blueprint": scale_blueprint_out,
+            }
+        except Exception as e:
+            logger.warning("Final preview build failed: %s", e)
+
         return final_metrics

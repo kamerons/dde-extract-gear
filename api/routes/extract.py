@@ -13,7 +13,6 @@ from api.config import Config
 from api.services.task_service import TaskService
 from shared.box_detector_augment import compute_translation_margin_lines, crop_to_inner_rect
 from shared.extract_regions import compute_boxes
-from task.processors.evaluation_processor import run_evaluate_all_labeled
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +85,46 @@ def _box_detector_load_path() -> tuple[Path | None, Path, str]:
     return (None, model_dir, stem)
 
 
+def _box_detector_stem() -> str:
+    """Stem for box detector model filenames (no .keras/.h5)."""
+    stem = Path(config.BOX_DETECTOR_MODEL_PATH).name
+    if stem.endswith(".keras") or stem.endswith(".h5"):
+        stem = Path(stem).stem
+    return stem
+
+
+def _box_detector_path_for_model_id(model_dir: Path, stem: str, model_id: str) -> Path | None:
+    """
+    Resolve model_id to a .keras path under model_dir. Only allows known ids:
+    stem_current, stem_YYYYMMDD_HHMMSS, or stem. Returns None if invalid or file missing.
+    """
+    if not model_id or not isinstance(model_id, str):
+        return None
+    # Restrict to alphanumeric and underscore
+    if not model_id.replace("_", "").isalnum():
+        return None
+    path = (model_dir / (model_id + ".keras")).resolve()
+    try:
+        path.relative_to(model_dir.resolve())
+    except ValueError:
+        return None
+    if not path.exists() or not path.is_file():
+        return None
+    # Allow stem_current, stem (legacy), or stem_YYYYMMDD_HHMMSS
+    if model_id == stem or model_id == stem + "_current":
+        return path
+    if model_id.startswith(stem + "_") and len(model_id) == len(stem) + 1 + 15:
+        suffix = model_id[len(stem) + 1 :]
+        if len(suffix) == 15 and suffix[8:9] == "_":
+            try:
+                int(suffix[:8])
+                int(suffix[9:])
+                return path
+            except ValueError:
+                pass
+    return None
+
+
 def _box_detector_not_found_detail(model_dir: Path, stem: str) -> str:
     """Message for 404 when no box detector model is found; includes path we looked in."""
     return (
@@ -93,6 +132,33 @@ def _box_detector_not_found_detail(model_dir: Path, stem: str) -> str:
         f"{stem}_current.keras, {stem}_<timestamp>.keras, or {stem}.keras. "
         "Run training first or check DATA_DIR and BOX_DETECTOR_MODEL_PATH (and volume mount if using Docker)."
     )
+
+
+def _list_box_detector_models() -> list[dict]:
+    """List available box detector models for dropdown. Returns list of { id, display_name, is_current? }."""
+    model_dir = (_data_dir() / "models" / "box_detector").resolve()
+    stem = _box_detector_stem()
+    out = []
+    current_path = model_dir / (stem + "_current.keras")
+    if current_path.exists():
+        out.append({"id": stem + "_current", "display_name": "Current (checkpoint)", "is_current": True})
+    timestamped = sorted(
+        model_dir.glob(f"{stem}_[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]_[0-9][0-9][0-9][0-9][0-9][0-9].keras"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    for p in timestamped:
+        # display from stem suffix e.g. 20240308_120000 -> "2024-03-08 12:00:00"
+        suf = p.stem[len(stem) + 1 :]
+        if len(suf) == 15 and suf[8:9] == "_":
+            display = f"{suf[:4]}-{suf[4:6]}-{suf[6:8]} {suf[9:11]}:{suf[11:13]}:{suf[13:15]}"
+        else:
+            display = p.stem
+        out.append({"id": p.stem, "display_name": display})
+    legacy_path = model_dir / (stem + ".keras")
+    if legacy_path.exists() and not any(x["id"] == stem for x in out):
+        out.append({"id": stem, "display_name": "Legacy"})
+    return out
 
 
 def _screenshot_path(filename: str, subdir: str = "unlabeled/screenshots") -> Path:
@@ -128,25 +194,38 @@ class SaveOriginRequest(BaseModel):
     origin_y: int
 
 
-@router.get("/api/extract/model-metrics")
-async def get_model_metrics():
+@router.get("/api/extract/models")
+async def list_models():
     """
-    Compute metrics for the loaded box detector model on all labeled images (no train/test split).
-    Returns accuracy_within_5px, test_mae_x, test_mae_y. Frontend may label these as (estimate).
+    List available box detector models (current checkpoint, timestamped, legacy).
+    Returns list of { id, display_name, is_current? } for dropdown.
     """
-    data_dir = _data_dir()
-    result = run_evaluate_all_labeled(
-        data_dir,
-        shift_regular=config.augment_shifts_regular,
-        shift_blueprint=config.augment_shifts_blueprint,
-        fill_mode=config.EXTRACT_AUGMENT_FILL,
-        augment_count=config.EXTRACT_AUGMENT_COUNT,
-        scale_regular=config.EXTRACT_REGULAR_SCALE,
-        scale_blueprint=config.EXTRACT_BLUEPRINT_SCALE,
+    return _list_box_detector_models()
+
+
+class ModelEvaluationStartBody(BaseModel):
+    """Optional body for POST /api/extract/model-evaluation/start."""
+
+    model_id: str | None = None
+    scope: str = "all"
+
+
+@router.post("/api/extract/model-evaluation/start")
+async def model_evaluation_start(body: ModelEvaluationStartBody | None = None):
+    """
+    Start a model evaluation task on the worker (metrics + per-image results).
+    Poll GET /api/tasks/{task_id} until status is completed or failed; then results
+    contain metrics, items, scale_regular, scale_blueprint.
+    """
+    if body is None:
+        body = ModelEvaluationStartBody()
+    scope = body.scope if body.scope in ("all", "test") else "all"
+    task_id = task_service.create_evaluation_task(
+        eval_type="model_evaluation",
+        model_id=body.model_id,
+        scope=scope,
     )
-    if "error" in result:
-        raise HTTPException(status_code=404, detail=result.get("message", result.get("error", "Unknown error")))
-    return result
+    return {"task_id": task_id, "status": "pending"}
 
 
 @router.get("/api/extract/config")
@@ -403,6 +482,17 @@ class TrainingStartRequest(BaseModel):
 
     model_type: str = "box_detector"
     resume_from_existing: bool = False
+
+
+@router.get("/api/extract/training/current")
+async def training_current():
+    """
+    Return the current training task id if one is pending or processing, else null.
+    Used by the run_training_until_100_and_shutdown script to attach to an existing
+    task instead of starting a new one (which would cancel the current task).
+    """
+    task_id = task_service.get_current_training_task_id()
+    return {"task_id": task_id}
 
 
 @router.post("/api/extract/training/start")

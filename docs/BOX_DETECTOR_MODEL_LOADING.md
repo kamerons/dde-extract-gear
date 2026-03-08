@@ -1,6 +1,6 @@
 # Box detector model loading: summary
 
-This document summarizes how box detector models are saved and loaded, the issues we hit (404 “model not found”, Keras “File not found”), and how they were fixed.
+This document summarizes how box detector models are saved and loaded, the issues we hit (404 "model not found", Keras "File not found"), and how they were fixed.
 
 ---
 
@@ -15,16 +15,18 @@ This document summarizes how box detector models are saved and loaded, the issue
 
 The **task worker** (and only the task worker) loads and runs the box detector model for inference. The API does **not** load the model; evaluate and preview are run as tasks in the task container. The API and task worker must see the same directory (same volume mount in Docker). See [EXTRACT_TRAINING_FLOW.md](EXTRACT_TRAINING_FLOW.md) for the full flow.
 
+**Why the API must not run models:** The API container must not load or run box detector models. Models are trained and saved in the task container, which may use a different Keras/TensorFlow (or backend) version than the API container. Loading a saved model in the API can fail with deserialization errors (e.g. `Conv2D` / `batch_input_shape`). All model loading and inference run only in the **task (worker) container**.
+
 ---
 
-## 2. What was going wrong (404 “model not found”)
+## 2. What was going wrong (404 "model not found")
 
-Users saw **404** and the message *“Box detector model not found. Run training first.”* even when files were present in `data/models/box_detector/`.
+Users saw **404** and the message *"Box detector model not found. Run training first."* even when files were present in `data/models/box_detector/`.
 
 ### What we found
 
 1. **Path resolution was correct**  
-   Logs showed `load_path=/app/data/models/box_detector/box_detector_model_current.keras` and the file was visible to the API (e.g. via `docker exec ... ls` and the debug endpoint). So the 404 was **not** from “no file at that path.”
+   Logs showed `load_path=/app/data/models/box_detector/box_detector_model_current.keras` and the file was visible to the API (e.g. via `docker exec ... ls` and the debug endpoint). So the 404 was **not** from "no file at that path."
 
 2. **Keras was failing to load the file**  
    The API calls `keras.models.load_model(load_path)`. Keras raised:
@@ -32,7 +34,7 @@ Users saw **404** and the message *“Box detector model not found. Run training
    ValueError: File not found: filepath=.../box_detector_model_current.keras.
    Please ensure the file is an accessible `.keras` zip file.
    ```
-   So the failure was **inside Keras**, not “file doesn’t exist on disk.”
+   So the failure was **inside Keras**, not "file doesn't exist on disk."
 
 3. **The file was not a valid .keras zip**  
    We checked in the container:
@@ -45,7 +47,7 @@ Users saw **404** and the message *“Box detector model not found. Run training
    "
    # is_zipfile: False
    ```
-   Keras 3 expects a `.keras` file to be a **zip archive** (with `config.json`, `model.weights.h5`, `metadata.json`, etc.). The on-disk file was ~101 MB and had a `.keras` extension but was **not** a zip (likely HDF5 or another format written with a `.keras` name). So Keras tried to open it as a zip, failed, and reported “File not found.”
+   Keras 3 expects a `.keras` file to be a **zip archive** (with `config.json`, `model.weights.h5`, `metadata.json`, etc.). The on-disk file was ~101 MB and had a `.keras` extension but was **not** a zip (likely HDF5 or another format written with a `.keras` name). So Keras tried to open it as a zip, failed, and reported "File not found."
 
 4. **Why the trainer wrote a non-zip file**  
    The trainer used `model.save(path_str, save_format="keras")` with a fallback to `model.save(path_str)`. In some TensorFlow/Keras versions the fallback writes HDF5 (or another format) even when the path ends in `.keras`, so the resulting file was not the zip format the loader expects.
@@ -72,7 +74,7 @@ Users saw **404** and the message *“Box detector model not found. Run training
 
 ### API: no model loading
 
-- The API does not load the box detector model. Evaluate and preview run in the task container; the client gets results via task status or the latest-preview endpoint (see below).
+- The API does not load the box detector model. Evaluate, preview, and **model-metrics / model-results** (metrics and per-image results for a selected model) all run in the task container. The client gets results via task status or the latest-preview endpoint. For metrics and results for a specific model, the client calls **POST /api/extract/model-evaluation/start** (with optional `model_id` and `scope`) and polls **GET /api/tasks/{task_id}** until completed; `results` then contain `metrics`, `items`, `scale_regular`, and `scale_blueprint`.
 
 ---
 
@@ -82,7 +84,10 @@ Users saw **404** and the message *“Box detector model not found. Run training
    The processor saves with `keras.saving.save_model()` when available so new checkpoints and final models are valid .keras zip files.
 
 2. **Evaluate / preview** (task container only)  
-   The client can call `POST /api/extract/training/evaluate` or `POST .../preview` to run a one-off evaluation task; the API enqueues it and returns `task_id`; the client polls `GET /api/tasks/{task_id}` for results and `model_format`. During **training**, the worker’s background eval loop (and on completion) automatically runs the current model on the test set and writes preview data (items, scales) to Redis. The frontend polls `GET /api/extract/training/preview/latest` to get the latest preview and display it; no manual “Run preview” is required.
+   The client can call `POST /api/extract/training/evaluate` or `POST .../preview` to run a one-off evaluation task; the API enqueues it and returns `task_id`; the client polls `GET /api/tasks/{task_id}` for results and `model_format`. During **training**, the worker's background eval loop (and on completion) automatically runs the current model on the test set and writes preview data (items, scales) to Redis. The frontend polls `GET /api/extract/training/preview/latest` to get the latest preview and display it; no manual "Run preview" is required.
+
+3. **Model metrics and results** (task container only)  
+   To get metrics and per-image results for a specific model (e.g. when the user selects a model in the UI), the client calls **POST /api/extract/model-evaluation/start** with body `{ "model_id": "<id or null>", "scope": "all" | "test" }`. The API enqueues a `model_evaluation` task and returns `task_id`. The client polls **GET /api/tasks/{task_id}**; when `status` is `completed`, `results` contain `metrics`, `items`, `scale_regular`, and `scale_blueprint`. This ensures the model is loaded and run only in the task container, avoiding API/worker library version mismatch.
 
 ---
 
@@ -90,7 +95,7 @@ Users saw **404** and the message *“Box detector model not found. Run training
 
 - **HDF5 models** (file exists but `zipfile.is_zipfile()` is False, e.g. content starts with `\x89HDF`): The task container loads them by copying to a temp `.h5` path, so they work without retraining. New training should still write proper .keras zips (extension-driven save in the trainer).
 - **New models:** Run a **new training** (start training and let it complete or at least save a checkpoint). New files should be saved as proper .keras zips and will load in the task container.
-- **Verify (optional):** After a new checkpoint exists, you can confirm it’s a zip, e.g.:
+- **Verify (optional):** After a new checkpoint exists, you can confirm it's a zip, e.g.:
   ```bash
   docker exec armor_select_task python3 -c "
   import zipfile
@@ -112,4 +117,4 @@ Users saw **404** and the message *“Box detector model not found. Run training
 - Path resolution in API: `api/routes/extract.py` (`_box_detector_load_path`).
 - Loading and format logging: `task/processors/evaluation_processor.py` (`_load_box_detector_model`, `run_evaluate`, `run_preview`, `build_preview_items`).
 - Save format: `task/processors/box_detector_processor.py` (`_save_model_native`).
-- Latest preview endpoint: `GET /api/extract/training/preview/latest` returns the most recent preview written by the worker’s eval loop or on training completion.
+- Latest preview endpoint: `GET /api/extract/training/preview/latest` returns the most recent preview written by the worker's eval loop or on training completion.

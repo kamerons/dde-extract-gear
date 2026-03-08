@@ -1218,9 +1218,34 @@
 }
 
 .extract-config-training-results ul,
-.extract-config-evaluate-results ul {
+.extract-config-evaluate-results ul,
+.extract-config-loaded-model-metrics ul {
   margin: 0.25rem 0 0 1rem;
   padding: 0;
+}
+
+.extract-config-model-select-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.extract-config-model-select-label {
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.extract-config-model-select {
+  min-width: 12rem;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.95rem;
+}
+
+.extract-config-no-metrics {
+  margin: 0.5rem 0 0 1rem;
+  color: #666;
+  font-size: 0.95rem;
 }
 
 .extract-config-augment-section {

@@ -1,12 +1,17 @@
 """Run box detector training via the API; when it reaches 100% test accuracy, shut down the machine.
 
 Requires the API and task worker to be running (e.g. `python start.py start`). This script
-starts a single training run, polls until it completes, then if accuracy_within_5px >= 1.0
-(or stopped_early_100 is true), runs `sudo shutdown -h now`. Only the shutdown command needs
-sudo; run the script as a normal user. For unattended use, configure NOPASSWD for shutdown
-in sudoers, e.g.:
+starts a single training run (or attaches to one already in progress), polls until it
+completes, then if accuracy_within_5px >= 1.0 (or stopped_early_100 is true), runs
+`sudo shutdown -h now`. Only the shutdown command needs sudo; run the script as a normal user.
+For unattended use, configure NOPASSWD for shutdown in sudoers, e.g.:
 
   %shutdown ALL=(ALL) NOPASSWD: /usr/sbin/shutdown
+
+If a training task is already pending or processing (e.g. from the UI or a previous run),
+the script attaches to that task instead of starting a new one, so the task is not cancelled.
+Run only one instance of this script; if you run it again while one is already polling,
+the second run will attach to the same task.
 
 Usage:
   API_BASE_URL=http://localhost:8000 python scripts/run_training_until_100_and_shutdown.py
@@ -29,28 +34,44 @@ def main() -> int:
     if not base_url:
         base_url = "http://localhost:8000"
 
-    # Start training
-    req = urllib.request.Request(
-        f"{base_url}/api/extract/training/start",
-        data=json.dumps({"model_type": "box_detector"}).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
+    task_id = None
+    # Attach to existing training task if one is already running (avoids cancelling it)
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            body = json.loads(resp.read().decode())
-    except urllib.error.URLError as e:
-        print(f"Failed to start training: {e}", file=sys.stderr)
-        return 1
-    except json.JSONDecodeError as e:
-        print(f"Invalid start response: {e}", file=sys.stderr)
-        return 1
+        with urllib.request.urlopen(f"{base_url}/api/extract/training/current", timeout=10) as resp:
+            data = json.loads(resp.read().decode())
+            current_id = data.get("task_id") if isinstance(data, dict) else None
+            if current_id:
+                with urllib.request.urlopen(f"{base_url}/api/tasks/{current_id}", timeout=10) as status_resp:
+                    status_data = json.loads(status_resp.read().decode())
+                    status = status_data.get("status", "")
+                    if status in ("pending", "processing"):
+                        task_id = current_id
+                        print(f"Attaching to existing training task {task_id}; polling until completed.")
+    except (urllib.error.URLError, json.JSONDecodeError, KeyError):
+        pass
 
-    task_id = body.get("task_id")
     if not task_id:
-        print("Start response missing task_id", file=sys.stderr)
-        return 1
-    print(f"Started training task {task_id}; polling until completed.")
+        # Start a new training task
+        req = urllib.request.Request(
+            f"{base_url}/api/extract/training/start",
+            data=json.dumps({"model_type": "box_detector"}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                body = json.loads(resp.read().decode())
+        except urllib.error.URLError as e:
+            print(f"Failed to start training: {e}", file=sys.stderr)
+            return 1
+        except json.JSONDecodeError as e:
+            print(f"Invalid start response: {e}", file=sys.stderr)
+            return 1
+        task_id = body.get("task_id")
+        if not task_id:
+            print("Start response missing task_id", file=sys.stderr)
+            return 1
+        print(f"Started training task {task_id}; polling until completed.")
 
     # Poll until completed, failed, or cancelled
     while True:

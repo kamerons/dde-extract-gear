@@ -6,15 +6,19 @@ import {
   getTrainingTaskStatus,
   getExtractConfig,
   getTrainingDataCounts,
-  getLoadedModelMetrics,
+  listModels,
+  startModelEvaluationTask,
   type TrainingTaskStatus,
   type EvaluateResponse,
   type TrainingPreviewResponse,
   type ExtractConfigResponse,
   type TrainingDataCountsResponse,
+  type ModelOption,
+  type ModelScope,
 } from '../api/extract';
 import { OriginScaleEditor } from './OriginScaleEditor';
 import { TrainingPreview } from './TrainingPreview';
+import { AccuracyStats } from './AccuracyStats';
 
 const TRAINING_POLL_INTERVAL_MS = 2000;
 const DEFAULT_PREVIEW_EVERY_N_EPOCHS = 20;
@@ -76,8 +80,18 @@ export function ExtractTraining() {
   const [previewWaitStart, setPreviewWaitStart] = useState<number | null>(null);
   const [circleProgress, setCircleProgress] = useState(0);
   const [trainingDataCounts, setTrainingDataCounts] = useState<TrainingDataCountsResponse | null>(null);
+  const [modelOptions, setModelOptions] = useState<ModelOption[]>([]);
+  const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
   const [loadedModelMetrics, setLoadedModelMetrics] = useState<EvaluateResponse | null>(null);
+  const [loadedModelResults, setLoadedModelResults] = useState<TrainingPreviewResponse | null>(null);
+  const [loadingModelMetrics, setLoadingModelMetrics] = useState(false);
+  const [loadingModelResults, setLoadingModelResults] = useState(false);
+  const [loadedModelError, setLoadedModelError] = useState<string | null>(null);
+  const [modelEvaluationTaskId, setModelEvaluationTaskId] = useState<string | null>(null);
+  const modelEvaluationTaskIdRef = useRef<string | null>(null);
   const trainingPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const modelEvalPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const modelEvalRequestIdRef = useRef(0);
   const prevEvalKeyRef = useRef<string | null>(null);
   const lastEpochWithPreviewRef = useRef<number>(-1);
   const previewWaitStartRef = useRef<number | null>(null);
@@ -100,12 +114,116 @@ export function ExtractTraining() {
   const showLoadedModelMetrics =
     modelSubTab === 'box_detector' &&
     (trainingStatus !== 'pending' && trainingStatus !== 'processing');
+
   useEffect(() => {
-    if (!showLoadedModelMetrics) return;
-    getLoadedModelMetrics()
-      .then(setLoadedModelMetrics)
-      .catch(() => setLoadedModelMetrics(null));
-  }, [showLoadedModelMetrics, trainingStatus]);
+    if (!showLoadedModelMetrics || modelSubTab !== 'box_detector') return;
+    listModels()
+      .then((list) => {
+        setModelOptions(list);
+        setSelectedModelId((prev) => {
+          if (list.length === 0) return null;
+          if (prev && list.some((m) => m.id === prev)) return prev;
+          const current = list.find((m) => m.is_current);
+          return current ? current.id : list[0].id;
+        });
+      })
+      .catch(() => setModelOptions([]));
+  }, [showLoadedModelMetrics, modelSubTab]);
+
+  useEffect(() => {
+    if (!showLoadedModelMetrics || selectedModelId == null) {
+      setLoadedModelMetrics(null);
+      setLoadedModelResults(null);
+      setLoadedModelError(null);
+      modelEvaluationTaskIdRef.current = null;
+      setModelEvaluationTaskId(null);
+      if (modelEvalPollRef.current) {
+        clearInterval(modelEvalPollRef.current);
+        modelEvalPollRef.current = null;
+      }
+      return;
+    }
+    setLoadedModelError(null);
+    setLoadingModelMetrics(true);
+    setLoadingModelResults(true);
+    const requestId = ++modelEvalRequestIdRef.current;
+    startModelEvaluationTask(selectedModelId, 'all')
+      .then(({ task_id }) => {
+        if (requestId !== modelEvalRequestIdRef.current) return;
+        modelEvaluationTaskIdRef.current = task_id;
+        setModelEvaluationTaskId(task_id);
+      })
+      .catch((e) => {
+        if (requestId !== modelEvalRequestIdRef.current) return;
+        setLoadedModelMetrics(null);
+        setLoadedModelResults(null);
+        setLoadedModelError(e instanceof Error ? e.message : 'Failed to start model evaluation');
+        setLoadingModelMetrics(false);
+        setLoadingModelResults(false);
+      });
+  }, [showLoadedModelMetrics, selectedModelId]);
+
+  useEffect(() => {
+    if (!modelEvaluationTaskId) return;
+    const taskId = modelEvaluationTaskId;
+    const poll = async () => {
+      try {
+        const res = await getTrainingTaskStatus(taskId);
+        if (modelEvaluationTaskIdRef.current !== taskId) return;
+        if (res.status === 'completed' && res.results) {
+          const r = res.results as {
+            metrics?: EvaluateResponse;
+            items?: TrainingPreviewResponse['items'];
+            scale_regular?: number;
+            scale_blueprint?: number;
+          };
+          if (modelEvalPollRef.current) {
+            clearInterval(modelEvalPollRef.current);
+            modelEvalPollRef.current = null;
+          }
+          modelEvaluationTaskIdRef.current = null;
+          setModelEvaluationTaskId(null);
+          setLoadedModelMetrics(r.metrics ?? null);
+          setLoadedModelResults(
+            r.items != null
+              ? {
+                  items: r.items,
+                  scale_regular: Number(r.scale_regular) || 1,
+                  scale_blueprint: Number(r.scale_blueprint) || 1,
+                }
+              : null
+          );
+          if (r.metrics == null && (r.items == null || r.items.length === 0)) {
+            setLoadedModelError('No metrics or results for this model.');
+          }
+          setLoadingModelMetrics(false);
+          setLoadingModelResults(false);
+        } else if (res.status === 'failed') {
+          if (modelEvalPollRef.current) {
+            clearInterval(modelEvalPollRef.current);
+            modelEvalPollRef.current = null;
+          }
+          modelEvaluationTaskIdRef.current = null;
+          setModelEvaluationTaskId(null);
+          setLoadedModelMetrics(null);
+          setLoadedModelResults(null);
+          setLoadedModelError(res.error ?? 'Model evaluation failed');
+          setLoadingModelMetrics(false);
+          setLoadingModelResults(false);
+        }
+      } catch {
+        // keep polling
+      }
+    };
+    poll();
+    modelEvalPollRef.current = setInterval(poll, TRAINING_POLL_INTERVAL_MS);
+    return () => {
+      if (modelEvalPollRef.current) {
+        clearInterval(modelEvalPollRef.current);
+        modelEvalPollRef.current = null;
+      }
+    };
+  }, [modelEvaluationTaskId]);
 
   const handleStartTraining = useCallback(async () => {
     setTrainingError(null);
@@ -359,22 +477,33 @@ export function ExtractTraining() {
           {trainingStatus === 'completed' && trainingResults && (
             <div className="extract-config-training-results" role="status">
               <p className="stat-section-label">Last run</p>
+              {trainingResults.stopped_early_100 && (
+                <p className="extract-config-early-exit-message" role="status">
+                  Training stopped early: 100% test accuracy reached.
+                </p>
+              )}
               {typeof trainingResults.train_samples === 'number' && typeof trainingResults.test_samples === 'number' && (
                 <p className="extract-config-training-samples">
                   Train: {Number(trainingResults.train_samples)}, Test: {Number(trainingResults.test_samples)} samples
                 </p>
               )}
-              <ul>
-                {typeof trainingResults.test_mae_x === 'number' && (
-                  <li>Test MAE X: {trainingResults.test_mae_x.toFixed(4)}</li>
-                )}
-                {typeof trainingResults.test_mae_y === 'number' && (
-                  <li>Test MAE Y: {trainingResults.test_mae_y.toFixed(4)}</li>
-                )}
-                {typeof trainingResults.accuracy_within_5px === 'number' && (
-                  <li>Accuracy within 5px: {(Number(trainingResults.accuracy_within_5px) * 100).toFixed(2)}%</li>
-                )}
-              </ul>
+              {(typeof trainingResults.test_mae_x === 'number' || typeof trainingResults.test_mae_y === 'number') && (
+                <ul>
+                  {typeof trainingResults.test_mae_x === 'number' && (
+                    <li>Test MAE X: {trainingResults.test_mae_x.toFixed(4)}</li>
+                  )}
+                  {typeof trainingResults.test_mae_y === 'number' && (
+                    <li>Test MAE Y: {trainingResults.test_mae_y.toFixed(4)}</li>
+                  )}
+                </ul>
+              )}
+              {(typeof trainingResults.accuracy_within_15px === 'number' || typeof trainingResults.accuracy_within_5px === 'number' || typeof trainingResults.accuracy_within_3px === 'number') && (
+                <AccuracyStats
+                  accuracyWithin15Px={Number(trainingResults.accuracy_within_15px ?? 0)}
+                  accuracyWithin5Px={Number(trainingResults.accuracy_within_5px ?? 0)}
+                  accuracyWithin3Px={Number(trainingResults.accuracy_within_3px ?? 0)}
+                />
+              )}
             </div>
           )}
           {trainingStatus === 'failed' && trainingError && (
@@ -390,15 +519,52 @@ export function ExtractTraining() {
           {showLoadedModelMetrics && (
             <div className="extract-config-loaded-model-metrics" role="status">
               <p className="stat-section-label">Loaded model</p>
-              {loadedModelMetrics ? (
-                <ul>
-                  <li>Test MAE X (estimate): {loadedModelMetrics.test_mae_x.toFixed(4)}</li>
-                  <li>Test MAE Y (estimate): {loadedModelMetrics.test_mae_y.toFixed(4)}</li>
-                  <li>Accuracy within 5px (estimate): {(loadedModelMetrics.accuracy_within_5px * 100).toFixed(2)}%</li>
-                </ul>
-              ) : (
-                <p className="extract-config-no-metrics">No metrics for loaded model</p>
+              <div className="extract-config-model-select-row">
+                <label htmlFor="extract-model-select" className="extract-config-model-select-label">
+                  Model
+                </label>
+                <select
+                  id="extract-model-select"
+                  className="extract-config-model-select"
+                  value={selectedModelId ?? ''}
+                  onChange={(e) => setSelectedModelId(e.target.value || null)}
+                  disabled={modelOptions.length === 0}
+                  aria-label="Select model"
+                >
+                  {modelOptions.length === 0 && (
+                    <option value="">No models — run training first</option>
+                  )}
+                  {modelOptions.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.display_name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {loadedModelError && (
+                <p className="extract-config-no-metrics">{loadedModelError}</p>
               )}
+              {!loadedModelError && (loadingModelMetrics ? (
+                <p className="extract-config-no-metrics">Loading metrics…</p>
+              ) : loadedModelMetrics ? (
+                <AccuracyStats
+                  accuracyWithin15Px={loadedModelMetrics.accuracy_within_15px}
+                  accuracyWithin5Px={loadedModelMetrics.accuracy_within_5px}
+                  accuracyWithin3Px={loadedModelMetrics.accuracy_within_3px}
+                  labelSuffix=" (estimate)"
+                  className="extract-config-loaded-stats"
+                />
+              ) : (
+                <p className="extract-config-no-metrics">No metrics for selected model</p>
+              ))}
+              <TrainingPreview
+                fixedPreview={
+                  selectedModelId != null
+                    ? (loadedModelResults ?? null)
+                    : { items: [], scale_regular: 1, scale_blueprint: 1 }
+                }
+                fixedPreviewLoading={selectedModelId != null && loadingModelResults}
+              />
             </div>
           )}
           {trainingStatus === 'processing' && latestEval && (
@@ -407,14 +573,14 @@ export function ExtractTraining() {
                 <p className="stat-section-label">Test set</p>
                 <EvalCountdownCircle progress={circleProgress} />
               </div>
-              <ul>
-                <li>Test MAE X: {latestEval.test_mae_x.toFixed(4)}</li>
-                <li>Test MAE Y: {latestEval.test_mae_y.toFixed(4)}</li>
-                <li>Accuracy within 5px: {(latestEval.accuracy_within_5px * 100).toFixed(2)}%</li>
-              </ul>
+              <AccuracyStats
+                accuracyWithin15Px={latestEval.accuracy_within_15px}
+                accuracyWithin5Px={latestEval.accuracy_within_5px}
+                accuracyWithin3Px={latestEval.accuracy_within_3px}
+              />
             </div>
           )}
-          {modelSubTab === 'box_detector' && (
+          {modelSubTab === 'box_detector' && !showLoadedModelMetrics && (
             <TrainingPreview latestPreview={latestPreview} />
           )}
         </div>

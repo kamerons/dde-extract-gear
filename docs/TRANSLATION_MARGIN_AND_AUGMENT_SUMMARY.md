@@ -8,7 +8,7 @@ This document summarizes the work done to address data augmentation shifting ima
 
 **Problem:** The UI showed a "translation safe origin rect" (dashed green box) that was hard to interpret. The idea was to show how much the image could shift without losing the detection box.
 
-**Change:** Replaced that rect with **four thick orange lines** from the detection box edges to the cropped image edges, with an arrow-head at the image edge, so it’s clear where the limit is.
+**Change:** Replaced that rect with **four thick orange lines** from the detection box edges to the cropped image edges, with an arrow-head at the image edge, so it's clear where the limit is.
 
 - **Backend** ([shared/box_detector_augment.py](shared/box_detector_augment.py)): Added `compute_translation_margin_lines()` which, given origin, image size, crop bounds, scale, and image type, returns four segments in cropped pixel space (left, top, right, bottom), each from box edge to crop edge, using box center for the perpendicular coordinate.
 - **API** ([api/routes/extract.py](api/routes/extract.py)): `POST /api/extract/boxes` accepts optional `image_width` and `image_height`; when present, the response includes `translation_margin_lines`. Removed `translation_safe_origin_rect_*` from `GET /api/extract/config`.
@@ -21,14 +21,14 @@ This document summarizes the work done to address data augmentation shifting ima
 
 **Problem:** In the training preview, the **correct (GT) box** sometimes appeared offscreen—the image looked cropped or translated too much relative to where the box was drawn.
 
-**Cause:** In `augment_sample_label_aware()` the origin was clamped to the crop for computing shift limits, and the returned "new origin" was the clamped origin plus shift. The **actual** content in the cropped image stays at the saved label `(origin_crop_x, origin_crop_y)`. So we were (a) allowing shifts that kept a *clamped* box in frame instead of the real content, and (b) returning an origin that didn’t match where the card actually was in the augmented image.
+**Cause:** In `augment_sample_label_aware()` the origin was clamped to the crop for computing shift limits, and the returned "new origin" was the clamped origin plus shift. The **actual** content in the cropped image stays at the saved label `(origin_crop_x, origin_crop_y)`. So we were (a) allowing shifts that kept a *clamped* box in frame instead of the real content, and (b) returning an origin that didn't match where the card actually was in the augmented image.
 
 **Change** ([shared/box_detector_augment.py](shared/box_detector_augment.py)):
 
 - Config **x_neg, x_pos, y_neg, y_pos** define **crop only** (max fraction of full image discarded per side). They are not used to cap augmentation translation.
 - **Translation limits are geometric only**: actual label (origin in cropped space) plus box extents from `compute_detection_extents`. The box can be pushed to the crop edges in all four directions; no config cap on shift.
 - **Shift limits** are computed from the **unclamped** `origin_crop_x`, `origin_crop_y`, so the allowed translation keeps the detection box at the *actual* content position inside the crop.
-- **Returned origin** is now `(origin_crop_x + dx, origin_crop_y + dy)` instead of `(ox + dx, oy + dy)`, so the preview’s GT boxes are drawn at the real content position in the augmented image.
+- **Returned origin** is now `(origin_crop_x + dx, origin_crop_y + dy)` instead of `(ox + dx, oy + dy)`, so the preview's GT boxes are drawn at the real content position in the augmented image.
 
 This keeps the green box aligned with the card and avoids the "correct box offscreen" effect when the saved origin was near or past the crop edge.
 

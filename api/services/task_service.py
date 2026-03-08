@@ -138,18 +138,27 @@ class TaskService:
         logger.info(f"Created training task {task_id}")
         return task_id
 
-    def create_evaluation_task(self, eval_type: str = "evaluate") -> str:
+    def create_evaluation_task(
+        self,
+        eval_type: str = "evaluate",
+        model_id: Optional[str] = None,
+        scope: str = "all",
+    ) -> str:
         """
-        Create an evaluation task (evaluate or preview). Does not cancel other evaluation tasks.
+        Create an evaluation task (evaluate, preview, or model_evaluation). Does not cancel other evaluation tasks.
 
         Args:
-            eval_type: "evaluate" or "preview"
+            eval_type: "evaluate", "preview", or "model_evaluation"
+            model_id: Optional model id for model_evaluation (e.g. stem_YYYYMMDD_HHMMSS).
+            scope: For model_evaluation, "all" (all labeled) or "test" (test set only).
 
         Returns:
             Task ID (UUID string)
         """
-        if eval_type not in ("evaluate", "preview"):
+        if eval_type not in ("evaluate", "preview", "model_evaluation"):
             eval_type = "evaluate"
+        if scope not in ("all", "test"):
+            scope = "all"
         task_id = str(uuid.uuid4())
         task_meta = {
             "task_id": task_id,
@@ -163,10 +172,18 @@ class TaskService:
         self.redis_client.expire(meta_key, self.TASK_EXPIRY_SECONDS)
 
         task_data = {"task_id": task_id, "type": eval_type}
+        if eval_type == "model_evaluation":
+            if model_id is not None:
+                task_data["model_id"] = model_id
+            task_data["scope"] = scope
         self.redis_client.rpush(self.EVALUATION_QUEUE_KEY, json.dumps(task_data))
 
         logger.info(f"Created evaluation task {task_id} (type={eval_type})")
         return task_id
+
+    def get_current_training_task_id(self) -> str | None:
+        """Return the current training task id (pending or processing), or None."""
+        return self.redis_client.get(self.TRAINING_CURRENT_TASK_KEY)
 
     def cancel_training_task(self) -> bool:
         """Signal the current training task to cancel. Returns True if a task was running."""

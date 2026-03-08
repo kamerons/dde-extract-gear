@@ -68,23 +68,14 @@ This document describes how box-detector training, model saving, and the trainin
 5. **Worker** then:
    - Clears `TRAINING_CURRENT_TASK_KEY`.
    - Calls `update_task_status(task_id, "completed", results=results)` (writes to `task:{task_id}:meta` and `task:{task_id}:result`).
-   - Stops the eval thread (sets stop event, joins).
-
 ---
 
-## 4. Worker Eval Loop (Background Thread)
+## 4. Evaluation and preview at preview epochs
 
-- **Started** when a box_detector training task begins; **stopped** when the task finishes (success, fail, or cancel).
-- **Role:** Every 10s, load the **current checkpoint** and write test metrics to Redis so the UI can show live metrics without calling the API's evaluate endpoint.
-
-**Steps:**
-
-1. `data_dir` = `repo_root / config.DATA_DIR`; `stem` = `Path(BOX_DETECTOR_MODEL_PATH).name`; `current_path` = `data_dir / (stem + "_current.keras")` (same layout as processor).
-2. If `current_path` does not exist, skip (no checkpoint yet).
-3. Load model with the shared loader (format detection and logging: `.keras` zip vs HDF5); see `task/processors/evaluation_processor._load_box_detector_model`.
-4. Recompute test set: `_labeled_dirs`, `_scan_sources`, `_split_train_test` (stratified, 50% blueprint), then `_build_arrays` (crop + augment=True) for a larger test set.
-5. Compute metrics with `_compute_test_metrics(model, X_test, y_test)`.
-6. Write to Redis: `task:{task_id}:eval` = JSON of metrics, TTL 3600s. Also build preview items (same model and test set, augment=False) and write to `task:{task_id}:latest_preview` and `extract:training:latest_preview` (items, scale_regular, scale_blueprint).
+- Evaluation (test-set metrics and preview) runs **only when a preview epoch is reached** (`epoch % preview_every_n_epochs == 0`), not on a timer.
+- The **training processor** (`BoxDetectorProcessor`) already has the model and test data each epoch. At preview epochs it calls `build_preview_items(...)` and invokes the worker's `preview_callback(epoch, metrics, preview_payload)`.
+- The **worker** passes `progress_callback` and `preview_callback` to `process()`. In `progress_callback`, when `epoch % PREVIEW_EVERY_N_EPOCHS == 0`, it writes `task:{task_id}:eval` = JSON of metrics (TTL 3600s). When `preview_callback` is invoked, the worker writes `task:{task_id}:latest_preview`, `extract:training:latest_preview`, and `task:{task_id}:preview_expected_duration_ms` to Redis.
+- The checkpoint `_current.keras` is saved at preview epochs and on the last epoch (not every 10 epochs).
 
 ---
 
@@ -109,7 +100,7 @@ If the API and worker run in different containers and do not share the same `dat
 
 **One-off evaluation tasks:** **`POST /api/extract/training/evaluate`** and **`POST /api/extract/training/preview`** create an evaluation task and return `{ task_id }`; the client polls `GET /api/tasks/{task_id}` for results and `model_format`. The task worker loads the model, runs evaluate or preview, and writes results to Redis.
 
-**Automatic training preview:** During an active box detector training task, the worker's background eval loop (every 10s) loads the current checkpoint (`_current.keras`), runs it on the test set for metrics and for preview (predicted origins per test image), and writes to Redis: `task:{task_id}:eval` (metrics), `task:{task_id}:latest_preview` and `extract:training:latest_preview` (items, scale_regular, scale_blueprint). When training completes, the worker runs preview once more for the final model and writes the same preview keys. The frontend polls **`GET /api/extract/training/preview/latest`** and displays the latest preview; no manual "Run preview" is required. Task status `GET /api/tasks/{task_id}` also includes `latest_preview` when present.
+**Automatic training preview:** During an active box detector training task, evaluation and preview run only at **preview epochs** (when `epoch % preview_every_n_epochs == 0`). The training processor builds metrics and preview at those epochs and the worker writes to Redis: `task:{task_id}:eval` (metrics), `task:{task_id}:latest_preview` and `extract:training:latest_preview` (items, scale_regular, scale_blueprint). When training completes, the worker runs preview once more for the final model and writes the same preview keys. The frontend polls **`GET /api/extract/training/preview/latest`** and displays the latest preview; no manual "Run preview" is required. Task status `GET /api/tasks/{task_id}` also includes `latest_preview` when present.
 
 ---
 
@@ -119,7 +110,7 @@ If the API and worker run in different containers and do not share the same `dat
 
 - "Start training" -> `POST /api/extract/training/start` -> get `task_id` -> poll `GET /api/tasks/{task_id}` every 2s.
 - Displays status (pending / processing / completed / failed / cancelled), progress (epoch X / Y), and partial/final results (loss, test MAE, etc.).
-- When status is processing and `latest_eval` is present (from worker's eval thread -> Redis -> task status), shows a small "test set" metrics block with a countdown.
+- When status is processing and `latest_eval` is present (written at preview epochs -> Redis -> task status), shows a small "test set" metrics block with a countdown.
 
 **Training preview** (`TrainingPreview.tsx`):
 

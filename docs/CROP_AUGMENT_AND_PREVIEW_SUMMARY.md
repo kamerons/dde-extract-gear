@@ -45,14 +45,14 @@ This document summarizes the changes made to how images are cropped and augmente
 
 **Before:** The training preview (Next/Previous list) showed one item per **test source** image (cropped), with GT and predicted boxes.
 
-**After:** The preview shows one item per **augmented test sample** (test_sources × augment_count). Each item is the exact image the model was run on, with embedded image and GT/pred in that image’s space.
+**After:** The preview shows one item per **augmented test sample** (test_sources × augment_count). Each item is the exact image the model was run on, with embedded image and GT/pred in that image's space.
 
 - **Preview build** ([task/processors/evaluation_processor.py](task/processors/evaluation_processor.py)): `build_preview_items` now:
   - For each test source: crop, then generate `augment_count` augmented samples (same pipeline as training).
   - Runs the model on the full augmented test set.
   - Returns one item per augmented sample, each with:
     - `image_data_url`: base64 PNG of that augmented image (so no separate image fetch).
-    - `origin_x`, `origin_y`, `pred_x`, `pred_y`: in the augmented image’s coordinate space.
+    - `origin_x`, `origin_y`, `pred_x`, `pred_y`: in the augmented image's coordinate space.
     - `filename`, `subdir`, `augment_index` (1-based) for display.
 - **Frontend** ([frontend/src/components/TrainingPreview.tsx](frontend/src/components/TrainingPreview.tsx)): Uses `item.image_data_url` as the image `src` when present; otherwise falls back to `getScreenshotUrl(..., { crop: true })`. The index line shows e.g. `3 / 24 (001.png · augment 2)` when `augment_index` is set.
 
@@ -60,9 +60,9 @@ So you can step through **every** augmented test image in the existing Next/Prev
 
 ---
 
-## 5. Removed separate “Sample augments” UI
+## 5. Removed separate "Sample augments" UI
 
-The earlier design had a separate “Sample augments” section (dropdown to pick a source image, count, “Show augments” button, grid of cropped base + augments) and a **GET /api/extract/training/augment-preview** endpoint. That was removed so that:
+The earlier design had a separate "Sample augments" section (dropdown to pick a source image, count, "Show augments" button, grid of cropped base + augments) and a **GET /api/extract/training/augment-preview** endpoint. That was removed so that:
 
 - Augments only appear in the **training preview** list (Next/Previous) as part of the normal training-result API.
 - There is no second UI or endpoint for viewing augments.

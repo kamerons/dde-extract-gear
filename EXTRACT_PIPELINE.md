@@ -8,7 +8,7 @@ This document outlines the architecture for moving from fake armor data to real 
 
 ### 1. Source data
 
-- A **screenshot collection script** captures images from the user’s screen while they play. See [scripts/SCREENSHOT_COLLECTION.md](scripts/SCREENSHOT_COLLECTION.md).
+- A **screenshot collection script** captures images from the user's screen while they play. See [scripts/SCREENSHOT_COLLECTION.md](scripts/SCREENSHOT_COLLECTION.md).
 - The user triggers each capture with a key combination (e.g. **o** then **p**). Images are stored under `data/` according to the layout in [shared/DATA_LAYOUT.md](shared/DATA_LAYOUT.md).
 
 ### 2. Box detector
@@ -21,10 +21,10 @@ This document outlines the architecture for moving from fake armor data to real 
 
 ### 3. Two image classifiers
 
-- The legacy **image_splitter** is recreated (sizes and offsets from config, plus box type). It uses the box detector’s output (top-left) and the **user-provided type** (from the path or manifest) to crop regions from the screenshot.
+- The legacy **image_splitter** is recreated (sizes and offsets from config, plus box type). It uses the box detector's output (top-left) and the **user-provided type** (from the path or manifest) to crop regions from the screenshot.
 - Those crops feed two classifiers, trained via the same **interactive labeling** process:
   - **Stat-type (icon)** classifier: which stat the icon represents.
-  - **Stat-value (digit)** classifier: digit (and possibly “blob”) recognition.
+  - **Stat-value (digit)** classifier: digit (and possibly "blob") recognition.
 - For each of these, a portion of labeled data is **reserved as a test set**.
 
 ## Training as a task

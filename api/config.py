@@ -57,6 +57,9 @@ class Config:
 
     # Box detector (for extract routes / config endpoint)
     BOX_DETECTOR_TEST_RATIO: float = float(get_nested(_config_data, "box_detector", "test_ratio", default=0.25))
+    BOX_DETECTOR_TEST_BLUEPRINT_FRACTION: float = float(
+        get_nested(_config_data, "box_detector", "test_blueprint_fraction", default=0.5)
+    )
     BOX_DETECTOR_MODEL_PATH: str = str(
         get_nested(_config_data, "box_detector", "model_path", default="data/box_detector_model")
     )

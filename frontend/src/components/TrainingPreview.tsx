@@ -21,14 +21,18 @@ const PREVIEW_POLL_INTERVAL_MS = 2500;
 export interface TrainingPreviewProps {
   /** When set (e.g. from task status poll), preview is synced with training spinner and shows immediately. */
   latestPreview?: TrainingPreviewResponse | null;
+  /** When set (e.g. loaded model results), use this as the only data source and do not poll. */
+  fixedPreview?: TrainingPreviewResponse | null;
+  /** When true and fixedPreview is used, show loading state instead of empty message. */
+  fixedPreviewLoading?: boolean;
 }
 
-export function TrainingPreview({ latestPreview }: TrainingPreviewProps) {
+export function TrainingPreview({ latestPreview, fixedPreview, fixedPreviewLoading }: TrainingPreviewProps) {
   const [items, setItems] = useState<TrainingPreviewItem[]>([]);
   const [scaleRegular, setScaleRegular] = useState<number>(1.0);
   const [scaleBlueprint, setScaleBlueprint] = useState<number>(1.0);
   const [index, setIndex] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!fixedPreview);
   const [error, setError] = useState<string | null>(null);
   const [boxesGt, setBoxesGt] = useState<ExtractBox[]>([]);
   const [boxesPred, setBoxesPred] = useState<ExtractBox[]>([]);
@@ -46,8 +50,6 @@ export function TrainingPreview({ latestPreview }: TrainingPreviewProps) {
           setError(null);
           setIndex((i) => (i >= preview.items.length ? 0 : i));
         } else {
-          // Don't clear existing items when poll returns null (e.g. no preview yet or timing);
-          // keep previous data so we don't flash "Run training to see preview" during training.
           setItems((prev) => (prev.length > 0 ? prev : []));
         }
       })
@@ -61,6 +63,10 @@ export function TrainingPreview({ latestPreview }: TrainingPreviewProps) {
   }, []);
 
   useEffect(() => {
+    if (fixedPreview != null) {
+      setLoading(false);
+      return;
+    }
     pollLatest();
     pollRef.current = setInterval(pollLatest, PREVIEW_POLL_INTERVAL_MS);
     return () => {
@@ -69,11 +75,20 @@ export function TrainingPreview({ latestPreview }: TrainingPreviewProps) {
         pollRef.current = null;
       }
     };
-  }, [pollLatest]);
+  }, [fixedPreview, pollLatest]);
 
-  // Sync latestPreview from parent (task status) into local state so we display it immediately
-  // and retain it even if the poll hasn't returned yet or returns null.
   useEffect(() => {
+    if (fixedPreview?.items?.length) {
+      setItems(fixedPreview.items);
+      setScaleRegular(fixedPreview.scale_regular);
+      setScaleBlueprint(fixedPreview.scale_blueprint);
+      setError(null);
+      setIndex(0);
+    }
+  }, [fixedPreview]);
+
+  useEffect(() => {
+    if (fixedPreview != null) return;
     if (latestPreview?.items?.length) {
       setItems(latestPreview.items);
       setScaleRegular(latestPreview.scale_regular);
@@ -81,9 +96,13 @@ export function TrainingPreview({ latestPreview }: TrainingPreviewProps) {
       setError(null);
       setIndex((i) => (i >= latestPreview.items.length ? 0 : i));
     }
-  }, [latestPreview]);
+  }, [fixedPreview, latestPreview]);
 
-  const fromProp = latestPreview?.items?.length ? latestPreview : null;
+  const fromProp = fixedPreview?.items?.length
+    ? fixedPreview
+    : latestPreview?.items?.length
+      ? latestPreview
+      : null;
   const displayItems = fromProp?.items ?? items;
   const displayScaleRegular = fromProp ? fromProp.scale_regular : scaleRegular;
   const displayScaleBlueprint = fromProp ? fromProp.scale_blueprint : scaleBlueprint;
@@ -162,7 +181,8 @@ export function TrainingPreview({ latestPreview }: TrainingPreviewProps) {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [displayItems.length, handlePrev, handleNext]);
 
-  if (loading && displayItems.length === 0) {
+  const showLoading = (loading && displayItems.length === 0) || (fixedPreview != null && fixedPreviewLoading);
+  if (showLoading) {
     return (
       <div className="extract-config-training-preview">
         <p className="extract-config-preview-loading">Loading preview…</p>
@@ -174,7 +194,7 @@ export function TrainingPreview({ latestPreview }: TrainingPreviewProps) {
     return (
       <div className="extract-config-training-preview">
         <p className="extract-config-preview-empty" style={{ whiteSpace: 'pre-wrap' }}>
-          {error ?? 'Run training to see preview.'}
+          {error ?? (fixedPreview != null ? 'No results for this model.' : 'Run training to see preview.')}
         </p>
       </div>
     );

@@ -12,24 +12,15 @@ from typing import Dict, Optional
 import redis
 from task.config import Config
 from task.processors.recommendation_processor import RecommendationProcessor
-from task.processors.box_detector_processor import (
-    BoxDetectorProcessor,
-    _build_arrays,
-    _compute_test_metrics,
-    _labeled_dirs,
-    _scan_sources,
-    _split_train_test,
-)
+from task.processors.box_detector_processor import BoxDetectorProcessor
 from task.processors.evaluation_processor import (
-    _load_box_detector_model as load_box_detector_with_format,
-    build_preview_items,
     run_evaluate as eval_run_evaluate,
+    run_evaluate_all_labeled as eval_run_evaluate_all_labeled,
+    run_model_results as eval_run_model_results,
     run_preview as eval_run_preview,
 )
 from shared.recommendation_engine import TaskCancelledError
 
-EVAL_INTERVAL_SEC = 10
-EVAL_THREAD_JOIN_TIMEOUT_SEC = 15
 LATEST_PREVIEW_KEY = "extract:training:latest_preview"
 PREVIEW_TTL = 3600
 
@@ -79,6 +70,7 @@ class TaskWorker:
             test_blueprint_fraction=self.config.BOX_DETECTOR_TEST_BLUEPRINT_FRACTION,
             scale_regular=self.config.EXTRACT_REGULAR_SCALE,
             scale_blueprint=self.config.EXTRACT_BLUEPRINT_SCALE,
+            preview_every_n_epochs=self.config.PREVIEW_EVERY_N_EPOCHS,
         )
         self.running = False
 
@@ -161,106 +153,6 @@ class TaskWorker:
         except Exception as e:
             logger.warning(f"Failed to clear current task key: {e}")
 
-    def _eval_loop(
-        self,
-        stop_event: threading.Event,
-        task_id: str,
-        repo_root: Path,
-    ) -> None:
-        """Background thread: every 10s load current model and write test metrics to Redis."""
-        config = self.config
-        # Match processor: checkpoint under DATA_DIR/models/box_detector
-        data_dir = repo_root / config.DATA_DIR
-        model_dir = data_dir / "models" / "box_detector"
-        stem = Path(config.BOX_DETECTOR_MODEL_PATH).name
-        if stem.endswith(".keras") or stem.endswith(".h5"):
-            stem = Path(stem).stem
-        current_path = model_dir / (stem + "_current.keras")
-
-        while True:
-            if stop_event.wait(timeout=EVAL_INTERVAL_SEC):
-                break
-            if not current_path.exists():
-                continue
-            try:
-                model, _ = load_box_detector_with_format(current_path)
-            except Exception as e:
-                logger.debug("Eval thread skip load: %s", e)
-                continue
-            try:
-                labeled = _labeled_dirs(data_dir)
-                if not labeled:
-                    continue
-                sources = _scan_sources(labeled)
-                if not sources:
-                    continue
-                _, test_sources = _split_train_test(
-                    sources, config.BOX_DETECTOR_TEST_RATIO
-                )
-                if not test_sources:
-                    continue
-                X_test, y_test = _build_arrays(
-                    test_sources,
-                    augment=True,
-                    shift_regular=config.augment_shifts_regular,
-                    shift_blueprint=config.augment_shifts_blueprint,
-                    fill_mode=config.EXTRACT_AUGMENT_FILL,
-                    augment_count=config.EXTRACT_AUGMENT_COUNT,
-                )
-                metrics = _compute_test_metrics(model, X_test, y_test)
-                self.redis_client.setex(
-                    f"task:{task_id}:eval",
-                    3600,
-                    json.dumps(metrics),
-                )
-                # Only write preview when we've reached a multiple of PREVIEW_EVERY_N_EPOCHS
-                evaluated_str = self.redis_client.hget(f"task:{task_id}:meta", "evaluated")
-                try:
-                    evaluated = int(evaluated_str) if evaluated_str else 0
-                except (ValueError, TypeError):
-                    evaluated = 0
-                last_preview_str = self.redis_client.get(f"task:{task_id}:last_preview_epoch")
-                last_preview_epoch = int(last_preview_str) if last_preview_str else -1
-                preview_interval = config.PREVIEW_EVERY_N_EPOCHS
-                if (
-                    evaluated > 0
-                    and evaluated % preview_interval == 0
-                    and evaluated != last_preview_epoch
-                ):
-                    try:
-                        expected_ms = len(test_sources) * config.PREVIEW_MS_PER_IMAGE
-                        self.redis_client.setex(
-                            f"task:{task_id}:preview_expected_duration_ms",
-                            PREVIEW_TTL,
-                            str(expected_ms),
-                        )
-                        t0 = time.perf_counter()
-                        items, sr, sb = build_preview_items(
-                            model,
-                            test_sources,
-                            config.EXTRACT_REGULAR_SCALE,
-                            config.EXTRACT_BLUEPRINT_SCALE,
-                            config.augment_shifts_regular,
-                            config.augment_shifts_blueprint,
-                            config.EXTRACT_AUGMENT_FILL,
-                            config.EXTRACT_AUGMENT_COUNT,
-                        )
-                        elapsed_ms = int((time.perf_counter() - t0) * 1000)
-                        preview_payload = {"items": items, "scale_regular": sr, "scale_blueprint": sb}
-                        preview_json = json.dumps(preview_payload)
-                        self.redis_client.setex(f"task:{task_id}:latest_preview", PREVIEW_TTL, preview_json)
-                        self.redis_client.setex(LATEST_PREVIEW_KEY, PREVIEW_TTL, preview_json)
-                        self.redis_client.setex(f"task:{task_id}:last_preview_epoch", PREVIEW_TTL, str(evaluated))
-                        logger.info(
-                            "Preview generated in %d ms (%d items)",
-                            elapsed_ms,
-                            len(items),
-                        )
-                    except Exception as pe:
-                        logger.warning("Eval thread preview failed: %s", pe)
-            except Exception as e:
-                logger.debug("Eval thread skip: %s", e)
-
     def process_training_task(self, task_data: Dict) -> None:
         """Process a single training task (e.g. box detector)."""
         task_id = task_data["task_id"]
@@ -288,28 +180,49 @@ class TaskWorker:
                 total_planned=total_epochs,
                 partial_results=metrics
             )
+            # Write eval metrics to Redis at preview epochs so API can return latest_eval
+            if (
+                epoch > 0
+                and self.config.PREVIEW_EVERY_N_EPOCHS > 0
+                and epoch % self.config.PREVIEW_EVERY_N_EPOCHS == 0
+            ):
+                self.redis_client.setex(
+                    f"task:{task_id}:eval",
+                    3600,
+                    json.dumps(metrics),
+                )
+
+        def preview_callback(epoch: int, metrics: Dict, preview_payload: Dict) -> None:
+            """Called by processor at preview epochs; write preview to Redis."""
+            n_items = len(preview_payload.get("items", []))
+            expected_ms = n_items * self.config.PREVIEW_MS_PER_IMAGE
+            self.redis_client.setex(
+                f"task:{task_id}:preview_expected_duration_ms",
+                PREVIEW_TTL,
+                str(expected_ms),
+            )
+            preview_json = json.dumps(preview_payload)
+            self.redis_client.setex(f"task:{task_id}:latest_preview", PREVIEW_TTL, preview_json)
+            self.redis_client.setex(LATEST_PREVIEW_KEY, PREVIEW_TTL, preview_json)
+            self.redis_client.setex(f"task:{task_id}:last_preview_epoch", PREVIEW_TTL, str(epoch))
+            logger.info(
+                "Preview generated at epoch %d (%d items)",
+                epoch,
+                n_items,
+            )
 
         def check_cancelled() -> bool:
             cancelled = self.redis_client.get(f"task:{task_id}:cancelled")
             return cancelled == "1"
 
-        stop_eval_event = threading.Event()
-        eval_thread: Optional[threading.Thread] = None
         repo_root = Path(__file__).resolve().parent.parent
-
-        if model_type == "box_detector":
-            eval_thread = threading.Thread(
-                target=self._eval_loop,
-                args=(stop_eval_event, task_id, repo_root),
-                daemon=False,
-            )
-            eval_thread.start()
 
         try:
             if model_type == "box_detector":
                 results = self.training_processor.process(
                     task_id=task_id,
                     progress_callback=progress_callback,
+                    preview_callback=preview_callback,
                     check_cancelled=check_cancelled,
                     resume_from_existing=resume_from_existing,
                 )
@@ -329,43 +242,54 @@ class TaskWorker:
                 )
                 return
 
-            data_dir = repo_root / self.config.DATA_DIR
-            logger.info("Running completion preview (data_dir=%s)", data_dir)
-            t0 = time.perf_counter()
-            preview_result = eval_run_preview(
-                data_dir,
-                self.config.BOX_DETECTOR_TEST_RATIO,
-                self.config.augment_shifts_regular,
-                self.config.augment_shifts_blueprint,
-                self.config.EXTRACT_AUGMENT_FILL,
-                self.config.EXTRACT_AUGMENT_COUNT,
-                self.config.EXTRACT_REGULAR_SCALE,
-                self.config.EXTRACT_BLUEPRINT_SCALE,
-                self.config.BOX_DETECTOR_TEST_BLUEPRINT_FRACTION,
-            )
-            elapsed_ms = int((time.perf_counter() - t0) * 1000)
-            if "error" not in preview_result:
-                preview_payload = {
-                    "items": preview_result["items"],
-                    "scale_regular": preview_result["scale_regular"],
-                    "scale_blueprint": preview_result["scale_blueprint"],
-                }
-                preview_json = json.dumps(preview_payload)
+            # Use in-process final_preview when present to avoid re-running the test set on GPU
+            final_preview = results.get("final_preview")
+            if final_preview and isinstance(final_preview, dict) and "items" in final_preview:
+                preview_json = json.dumps(final_preview)
                 self.redis_client.setex(f"task:{task_id}:latest_preview", PREVIEW_TTL, preview_json)
                 self.redis_client.setex(LATEST_PREVIEW_KEY, PREVIEW_TTL, preview_json)
-                logger.info(
-                    "Completion preview generated in %d ms (%d items)",
-                    elapsed_ms,
-                    len(preview_result["items"]),
-                )
+                n_items = len(final_preview.get("items", []))
+                logger.info("Completion preview from processor (%d items), skipped eval_run_preview", n_items)
             else:
-                logger.warning(
-                    "Completion preview not written: %s",
-                    preview_result.get("message", preview_result.get("error", "unknown")),
+                data_dir = repo_root / self.config.DATA_DIR
+                logger.info("Running completion preview (data_dir=%s)", data_dir)
+                t0 = time.perf_counter()
+                preview_result = eval_run_preview(
+                    data_dir,
+                    self.config.BOX_DETECTOR_TEST_RATIO,
+                    self.config.augment_shifts_regular,
+                    self.config.augment_shifts_blueprint,
+                    self.config.EXTRACT_AUGMENT_FILL,
+                    self.config.EXTRACT_AUGMENT_COUNT,
+                    self.config.EXTRACT_REGULAR_SCALE,
+                    self.config.EXTRACT_BLUEPRINT_SCALE,
+                    self.config.BOX_DETECTOR_TEST_BLUEPRINT_FRACTION,
                 )
+                elapsed_ms = int((time.perf_counter() - t0) * 1000)
+                if "error" not in preview_result:
+                    preview_payload = {
+                        "items": preview_result["items"],
+                        "scale_regular": preview_result["scale_regular"],
+                        "scale_blueprint": preview_result["scale_blueprint"],
+                    }
+                    preview_json = json.dumps(preview_payload)
+                    self.redis_client.setex(f"task:{task_id}:latest_preview", PREVIEW_TTL, preview_json)
+                    self.redis_client.setex(LATEST_PREVIEW_KEY, PREVIEW_TTL, preview_json)
+                    logger.info(
+                        "Completion preview generated in %d ms (%d items)",
+                        elapsed_ms,
+                        len(preview_result["items"]),
+                    )
+                else:
+                    logger.warning(
+                        "Completion preview not written: %s",
+                        preview_result.get("message", preview_result.get("error", "unknown")),
+                    )
 
+            # Store results without final_preview to avoid duplicating large payload in task result
+            results_for_status = {k: v for k, v in results.items() if k != "final_preview"}
             self._clear_current_task(self.TRAINING_CURRENT_TASK_KEY)
-            self.update_task_status(task_id, "completed", results=results)
+            self.update_task_status(task_id, "completed", results=results_for_status)
             logger.info(f"Completed training task {task_id}")
 
         except TaskCancelledError:
@@ -381,13 +305,6 @@ class TaskWorker:
             error_msg = str(e)
             logger.error(f"Failed to process training task {task_id}: {error_msg}")
             self.update_task_status(task_id, "failed", error=error_msg)
-
-        finally:
-            if eval_thread is not None:
-                stop_eval_event.set()
-                eval_thread.join(timeout=EVAL_THREAD_JOIN_TIMEOUT_SEC)
-                if eval_thread.is_alive():
-                    logger.warning("Eval thread did not stop within timeout")
 
     def process_task(self, task_data: Dict) -> None:
         """
@@ -489,6 +406,55 @@ class TaskWorker:
                     scale_blueprint=self.config.EXTRACT_BLUEPRINT_SCALE,
                     test_blueprint_fraction=self.config.BOX_DETECTOR_TEST_BLUEPRINT_FRACTION,
                 )
+            elif eval_type == "model_evaluation":
+                model_id = task_data.get("model_id")
+                scope = task_data.get("scope", "all")
+                if scope not in ("all", "test"):
+                    scope = "all"
+                metrics_result = eval_run_evaluate_all_labeled(
+                    data_dir=data_dir,
+                    shift_regular=self.config.augment_shifts_regular,
+                    shift_blueprint=self.config.augment_shifts_blueprint,
+                    fill_mode=self.config.EXTRACT_AUGMENT_FILL,
+                    augment_count=self.config.EXTRACT_AUGMENT_COUNT,
+                    scale_regular=self.config.EXTRACT_REGULAR_SCALE,
+                    scale_blueprint=self.config.EXTRACT_BLUEPRINT_SCALE,
+                    model_id=model_id,
+                )
+                if "error" in metrics_result:
+                    self.update_task_status(
+                        task_id, "failed",
+                        error=metrics_result.get("message", metrics_result.get("error", "Unknown error")),
+                    )
+                    return
+                results_result = eval_run_model_results(
+                    data_dir=data_dir,
+                    shift_regular=self.config.augment_shifts_regular,
+                    shift_blueprint=self.config.augment_shifts_blueprint,
+                    fill_mode=self.config.EXTRACT_AUGMENT_FILL,
+                    augment_count=self.config.EXTRACT_AUGMENT_COUNT,
+                    scale_regular=self.config.EXTRACT_REGULAR_SCALE,
+                    scale_blueprint=self.config.EXTRACT_BLUEPRINT_SCALE,
+                    test_ratio=self.config.BOX_DETECTOR_TEST_RATIO,
+                    test_blueprint_fraction=self.config.BOX_DETECTOR_TEST_BLUEPRINT_FRACTION,
+                    model_id=model_id,
+                    scope=scope,
+                )
+                if "error" in results_result:
+                    self.update_task_status(
+                        task_id, "failed",
+                        error=results_result.get("message", results_result.get("error", "Unknown error")),
+                    )
+                    return
+                model_format = metrics_result.get("model_format") or results_result.get("model_format")
+                result = {
+                    "metrics": metrics_result,
+                    "items": results_result.get("items", []),
+                    "scale_regular": results_result.get("scale_regular", 1.0),
+                    "scale_blueprint": results_result.get("scale_blueprint", 1.0),
+                }
+                if model_format is not None:
+                    result["model_format"] = model_format
             else:
                 self.update_task_status(
                     task_id, "failed",

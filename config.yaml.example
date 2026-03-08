@@ -41,8 +41,7 @@ box_detector:
   model_path: data/models/box_detector/box_detector_model
   training_epochs: 1000
   preview_every_n_epochs: 20
-  preview_expected_duration_ms: 10000
-  preview_ms_per_image: 244  # used for expected duration estimate
+  preview_ms_per_image: 244  # used to compute preview_expected_duration_ms for frontend (n_items * this)
 
 task:
-  evaluation_worker_count: 4
+  evaluation_worker_count: 1  # limits GPU parallelism for evaluation tasks

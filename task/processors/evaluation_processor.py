@@ -34,6 +34,16 @@ from task.processors.box_detector_processor import (
 logger = logging.getLogger(__name__)
 
 
+def _box_detector_stem_from_config() -> str:
+    """Stem for box detector model filenames from config."""
+    from task.config import Config
+    cfg = Config()
+    stem = Path(cfg.BOX_DETECTOR_MODEL_PATH).name
+    if stem.endswith(".keras") or stem.endswith(".h5"):
+        stem = Path(stem).stem
+    return stem
+
+
 def _box_detector_load_path(data_dir: Path, model_path: str) -> tuple[Path | None, Path, str]:
     """
     Path to load for box detector: _current, latest timestamped, or legacy stem.keras.
@@ -58,6 +68,37 @@ def _box_detector_load_path(data_dir: Path, model_path: str) -> tuple[Path | Non
     if legacy_path.exists():
         return (legacy_path, model_dir, stem)
     return (None, model_dir, stem)
+
+
+def _box_detector_load_path_by_id(data_dir: Path, stem: str, model_id: str) -> Path | None:
+    """
+    Resolve model_id to a .keras path under box_detector dir. Only allows known ids:
+    stem_current, stem_YYYYMMDD_HHMMSS, or stem. Returns None if invalid or file missing.
+    """
+    if not model_id or not isinstance(model_id, str):
+        return None
+    if not model_id.replace("_", "").isalnum():
+        return None
+    model_dir = (data_dir / "models" / "box_detector").resolve()
+    path = (model_dir / (model_id + ".keras")).resolve()
+    try:
+        path.relative_to(model_dir)
+    except ValueError:
+        return None
+    if not path.exists() or not path.is_file():
+        return None
+    if model_id == stem or model_id == stem + "_current":
+        return path
+    if model_id.startswith(stem + "_") and len(model_id) == len(stem) + 1 + 15:
+        suffix = model_id[len(stem) + 1:]
+        if len(suffix) == 15 and suffix[8:9] == "_":
+            try:
+                int(suffix[:8])
+                int(suffix[9:])
+                return path
+            except ValueError:
+                pass
+    return None
 
 
 def _load_box_detector_model(load_path: Path) -> tuple[Any, str]:
@@ -187,6 +228,18 @@ def build_preview_items(
     return (items, scale_regular, scale_blueprint)
 
 
+def _resolve_load_path(data_dir: Path, model_id: str | None):
+    """Return (load_path, model_dir, stem). load_path is None if not found."""
+    stem = _box_detector_stem_from_config()
+    if model_id:
+        load_path = _box_detector_load_path_by_id(data_dir, stem, model_id)
+        model_dir = (data_dir / "models" / "box_detector").resolve()
+        return (load_path, model_dir, stem)
+    from task.config import Config
+    cfg = Config()
+    return _box_detector_load_path(data_dir, cfg.BOX_DETECTOR_MODEL_PATH)
+
+
 def run_evaluate(
     data_dir: Path,
     test_ratio: float,
@@ -195,15 +248,15 @@ def run_evaluate(
     fill_mode: str,
     augment_count: int,
     test_blueprint_fraction: float = 0.5,
+    model_id: str | None = None,
 ) -> dict[str, Any]:
     """
     Run evaluate: load model, build test set, return metrics dict.
     On error returns {"error": str, "message": str}.
     On success returns metrics with optional "model_format": "keras" | "hdf5".
+    If model_id is provided, load that specific model file; otherwise use default resolution.
     """
-    from task.config import Config
-    config = Config()
-    load_path, model_dir, _stem = _box_detector_load_path(data_dir, config.BOX_DETECTOR_MODEL_PATH)
+    load_path, model_dir, _stem = _resolve_load_path(data_dir, model_id)
     if load_path is None:
         return {
             "error": "model_not_found",
@@ -250,15 +303,15 @@ def run_evaluate_all_labeled(
     augment_count: int,
     scale_regular: float = 1.0,
     scale_blueprint: float = 1.0,
+    model_id: str | None = None,
 ) -> dict[str, Any]:
     """
     Compute metrics for the loaded box detector model on all labeled sources (no train/test split).
     Used by GET /api/extract/model-metrics for "loaded model" accuracy estimate.
     On error returns {"error": str, "message": str}. On success returns metrics dict.
+    If model_id is provided, load that specific model file; otherwise use default resolution.
     """
-    from task.config import Config
-    cfg = Config()
-    load_path, model_dir, _stem = _box_detector_load_path(data_dir, cfg.BOX_DETECTOR_MODEL_PATH)
+    load_path, model_dir, _stem = _resolve_load_path(data_dir, model_id)
     if load_path is None:
         return {
             "error": "model_not_found",
@@ -303,15 +356,15 @@ def run_preview(
     scale_regular: float,
     scale_blueprint: float,
     test_blueprint_fraction: float = 0.5,
+    model_id: str | None = None,
 ) -> dict[str, Any]:
     """
     Run preview: load model, build test set, predict, return items + scales.
     On error returns {"error": str, "message": str}.
     On success returns {"items": [...], "scale_regular": float, "scale_blueprint": float, "model_format": str}.
+    If model_id is provided, load that specific model file; otherwise use default resolution.
     """
-    from task.config import Config
-    config = Config()
-    load_path, model_dir, _stem = _box_detector_load_path(data_dir, config.BOX_DETECTOR_MODEL_PATH)
+    load_path, model_dir, _stem = _resolve_load_path(data_dir, model_id)
     if load_path is None:
         return {
             "error": "model_not_found",
@@ -352,4 +405,72 @@ def run_preview(
         "scale_regular": sr,
         "scale_blueprint": sb,
         "model_format": format_str,
+    }
+
+
+def run_model_results(
+    data_dir: Path,
+    shift_regular: tuple[float, float, float, float],
+    shift_blueprint: tuple[float, float, float, float],
+    fill_mode: str,
+    augment_count: int,
+    scale_regular: float,
+    scale_blueprint: float,
+    test_ratio: float = 0.25,
+    test_blueprint_fraction: float = 0.5,
+    model_id: str | None = None,
+    scope: str = "all",
+) -> dict[str, Any]:
+    """
+    Run preview for a model: return items (one per source image when scope=all, one per augment when scope=test).
+    On error returns {"error": str, "message": str}.
+    On success returns {"items": [...], "scale_regular": float, "scale_blueprint": float}.
+    """
+    load_path, model_dir, _stem = _resolve_load_path(data_dir, model_id)
+    if load_path is None:
+        return {
+            "error": "model_not_found",
+            "message": f"No box detector model found in {model_dir}. Run training first.",
+        }
+
+    labeled = _labeled_dirs(data_dir)
+    if not labeled:
+        return {"error": "no_labeled_data", "message": "No labeled screenshots found."}
+    sources = _scan_sources(labeled)
+    if not sources:
+        return {"error": "no_sources", "message": "No valid (image, .txt) pairs found."}
+
+    if scope == "test":
+        _, sources_to_use = _split_train_test(sources, test_ratio, test_blueprint_fraction)
+        aug_count = augment_count
+    else:
+        sources_to_use = sources
+        aug_count = 1  # one item per source image
+
+    if not sources_to_use:
+        return {"error": "no_test_set", "message": "No test set after split."}
+
+    try:
+        model, _ = _load_box_detector_model(load_path)
+    except Exception as e:
+        logger.exception("Failed to load box detector model from %s", load_path)
+        return {
+            "error": "load_failed",
+            "message": f"Keras failed to load model: {e!s}",
+        }
+
+    items, sr, sb = build_preview_items(
+        model,
+        sources_to_use,
+        scale_regular,
+        scale_blueprint,
+        shift_regular,
+        shift_blueprint,
+        fill_mode,
+        aug_count,
+    )
+    return {
+        "items": items,
+        "scale_regular": sr,
+        "scale_blueprint": sb,
     }

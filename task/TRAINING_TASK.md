@@ -8,7 +8,7 @@ Neural network training runs as a **task** in the existing task worker, using th
 
 ### Queues and worker design
 
-- **Long-running slot (one thread):** One worker thread consumes from **both** `training_tasks` and `recommendation_tasks` (`brpop([training_tasks, recommendation_tasks], ...)`). At most one training or one recommendation runs at a time. A key `training_current_task_id` identifies the active training task; `recommendation_current_task_id` the active recommendation task. When a new training (or recommendation) is created, only that type’s current task is cancelled; the other type’s queue is not cleared so the other type can wait in queue.
+- **Long-running slot (one thread):** One worker thread consumes from **both** `training_tasks` and `recommendation_tasks` (`brpop([training_tasks, recommendation_tasks], ...)`). At most one training or one recommendation runs at a time. A key `training_current_task_id` identifies the active training task; `recommendation_current_task_id` the active recommendation task. When a new training (or recommendation) is created, only that type's current task is cancelled; the other type's queue is not cleared so the other type can wait in queue.
 - **Evaluation pool:** A separate queue `evaluation_tasks` is consumed by a pool of N threads (config: `EVALUATION_WORKER_COUNT`). Multiple evaluation tasks (evaluate or preview) can run in parallel and are not blocked by the long-running training or recommendation.
 - **Training queue:** Payload includes `task_id` and `model_type` (e.g. `box_detector`).
 
@@ -22,7 +22,7 @@ Neural network training runs as a **task** in the existing task worker, using th
   - At run start, labeled screenshots (with `.txt` origins) are scanned and split into train/test (deterministic; test set is fixed for the whole run).
   - **Augmentation** (shift + fill) is applied in-process during training; see [shared/box_detector_augment.py](../shared/box_detector_augment.py). No separate augmentation script is used.
   - **Incremental data**: at the start of each epoch, the processor re-scans the labeled dirs; new (image, .txt) pairs are added to the training set for that epoch, so labels added from the front-end while training is running are included automatically.
-  - Training runs for a **fixed number of epochs** (config: `TRAINING_EPOCHS`). Progress (epoch, loss, accuracy) is written to Redis so the front-end can display it. After each epoch the processor saves the current model to a `_current` checkpoint path so the worker’s background eval thread can load it. The processor checks a cancellation flag between epochs.
+  - Training runs for a **fixed number of epochs** (config: `TRAINING_EPOCHS`). Progress (epoch, loss, accuracy) is written to Redis so the front-end can display it. After each epoch the processor saves the current model to a `_current` checkpoint path so the worker's background eval thread can load it. The processor checks a cancellation flag between epochs.
   - On completion (or when stopped), the model is saved to the path given by `BOX_DETECTOR_MODEL_PATH`.
 
 ### Triggering
@@ -31,7 +31,7 @@ Neural network training runs as a **task** in the existing task worker, using th
 
 ### Evaluation
 
-- During an active box detector training task, the worker runs a **background thread** that evaluates the current model (saved after each epoch to a `_current` checkpoint) against the test set **every 10 seconds** and writes metrics to Redis (`task:{task_id}:eval`). The front-end shows these as live metrics when polling `GET /api/tasks/{task_id}` (response includes `latest_eval` when present).
+- During an active box detector training task, evaluation (test-set metrics and preview) runs **only when a preview epoch is reached** (i.e. when `epoch % preview_every_n_epochs == 0`). The training processor computes metrics and builds the preview at those epochs and notifies the worker via callbacks; the worker writes to Redis (`task:{task_id}:eval`, `task:{task_id}:latest_preview`). The front-end shows these when polling `GET /api/tasks/{task_id}` (response includes `latest_eval` and `latest_preview` when present).
 - **Evaluation tasks:** Manual evaluate and preview run as **tasks** in the task container. The client calls `POST /api/extract/training/evaluate` or `POST /api/extract/training/preview`; the API enqueues an evaluation task and returns `task_id`. The client polls `GET /api/tasks/{task_id}`; the response includes `results` and `model_format` (e.g. `.keras` or `HDF5`). See `task/processors/evaluation_processor.py`.
 
 ## Interaction with API and front-end

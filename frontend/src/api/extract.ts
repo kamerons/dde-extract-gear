@@ -244,16 +244,49 @@ export interface TrainingTaskStatus {
 export interface EvaluateResponse {
   test_mae_x: number;
   test_mae_y: number;
+  accuracy_within_15px: number;
   accuracy_within_5px: number;
+  accuracy_within_3px: number;
+}
+
+export interface ModelOption {
+  id: string;
+  display_name: string;
+  is_current?: boolean;
 }
 
 /**
- * Fetch metrics for the currently loaded box detector model (computed live on all labeled images).
- * Returns null on 404 or error. Frontend should display values as (estimate).
+ * List available box detector models for the dropdown.
  */
-export async function getLoadedModelMetrics(): Promise<EvaluateResponse | null> {
-  const response = await fetch(`${API_BASE_URL}/api/extract/model-metrics`);
-  if (!response.ok) return null;
+export async function listModels(): Promise<ModelOption[]> {
+  const response = await fetch(`${API_BASE_URL}/api/extract/models`);
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Failed to list models: ${response.status} ${text}`);
+  }
+  return response.json();
+}
+
+export type ModelScope = 'all' | 'test';
+
+/**
+ * Start a model evaluation task on the worker (metrics + per-image results).
+ * Poll getTrainingTaskStatus(task_id) until status is 'completed' or 'failed'.
+ * When completed, results contain metrics, items, scale_regular, scale_blueprint.
+ */
+export async function startModelEvaluationTask(
+  modelId?: string,
+  scope: ModelScope = 'all'
+): Promise<{ task_id: string; status: string }> {
+  const response = await fetch(`${API_BASE_URL}/api/extract/model-evaluation/start`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model_id: modelId ?? null, scope }),
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Failed to start model evaluation: ${response.status} ${text}`);
+  }
   return response.json();
 }
 

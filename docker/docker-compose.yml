@@ -48,6 +48,8 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+    environment:
+      - TF_GPU_ALLOCATOR=cuda_malloc_async
     restart: unless-stopped
     # GPU for TensorFlow/Keras training and inference (optional; requires nvidia-container-toolkit on host)
     deploy:
