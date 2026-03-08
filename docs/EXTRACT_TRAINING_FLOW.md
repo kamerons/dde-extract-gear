@@ -47,10 +47,13 @@ This document describes how box-detector training, model saving, and the trainin
 
 2. **Data:**
    - Scans `data/labeled/screenshots/regular` and `data/labeled/screenshots/blueprint` for `*.png` with a matching `.txt` (origin x,y).
-   - **Each epoch:** re-scans labeled dirs and re-splits into train/test (sort by (type, name), last `test_ratio` = test). So as you label new images, both train and test sets grow.
+   - **Train/test split:** Stratified so the test set is ~50% blueprint (configurable via `box_detector.test_blueprint_fraction`). Regular and blueprint are split separately; test takes the last N of each to achieve the target ratio.
+   - **Each epoch:** re-scans labeled dirs and re-splits (same stratified logic). As you label new images, both train and test sets grow.
 
 3. **Per epoch:**
-   - Get current sources, split into train/test for this epoch.
+   - Get current sources, split into train/test (stratified).
+   - **Crop:** Each image is cropped using config margins (`extract.augment.regular` / `blueprint`); labels are transformed to cropped coords.
+   - **Augment:** Label-aware random shift + fill on the cropped image. Translation uses **geometric limits only** (label + box in cropped space), not config—the box can be pushed to the crop edges.
    - Build train arrays (augmented) and test arrays (augmented) for validation and metrics.
    - Run `model.fit(..., validation_data=(X_test_aug, y_test_aug))`.
    - Call `progress_callback(epoch, total_epochs, metrics)` -> worker writes to Redis.
@@ -79,7 +82,7 @@ This document describes how box-detector training, model saving, and the trainin
 1. `data_dir` = `repo_root / config.DATA_DIR`; `stem` = `Path(BOX_DETECTOR_MODEL_PATH).name`; `current_path` = `data_dir / (stem + "_current.keras")` (same layout as processor).
 2. If `current_path` does not exist, skip (no checkpoint yet).
 3. Load model with the shared loader (format detection and logging: `.keras` zip vs HDF5); see `task/processors/evaluation_processor._load_box_detector_model`.
-4. Recompute test set: `_labeled_dirs`, `_scan_sources`, `_split_train_test`, then `_build_arrays(..., augment=True)` for a larger test set.
+4. Recompute test set: `_labeled_dirs`, `_scan_sources`, `_split_train_test` (stratified, 50% blueprint), then `_build_arrays` (crop + augment=True) for a larger test set.
 5. Compute metrics with `_compute_test_metrics(model, X_test, y_test)`.
 6. Write to Redis: `task:{task_id}:eval` = JSON of metrics, TTL 3600s. Also build preview items (same model and test set, augment=False) and write to `task:{task_id}:latest_preview` and `extract:training:latest_preview` (items, scale_regular, scale_blueprint).
 
@@ -122,8 +125,8 @@ If the API and worker run in different containers and do not share the same `dat
 
 - Polls **`GET /api/extract/training/preview/latest`** periodically (e.g. every 2.5s). The worker writes the latest preview to Redis during training (eval loop) and on training completion; the API serves it from this endpoint.
 - When no preview is available yet: shows "Run training to see preview."
-- When preview data is returned: gets `items` (test set with pred_x, pred_y), `scale_regular`, `scale_blueprint`; displays prev/next and for the current item:
-  - Image URL: `getScreenshotUrl(item.filename, item.subdir)` -> `${VITE_API_BASE_URL}/api/extract/screenshots/${filename}?subdir=...`
+- When preview data is returned: gets `items` (test set with pred_x, pred_y in **cropped** image space), `scale_regular`, `scale_blueprint`; displays prev/next and for the current item:
+  - Image URL: `getScreenshotUrl(item.filename, item.subdir, { crop: true })` so the served image is the cropped view (matches origin/pred coords).
   - Two box requests: `fetchBoxes(item.origin_x, item.origin_y, ...)` (ground truth) and `fetchBoxes(item.pred_x, item.pred_y, ...)` (prediction) -> `POST /api/extract/boxes` to get box geometry, then draws SVG overlays.
 - Image load error: shows "Screenshot failed to load. Check API base URL (e.g. VITE_API_BASE_URL) if using Docker."
 

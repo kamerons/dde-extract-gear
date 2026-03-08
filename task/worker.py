@@ -72,10 +72,13 @@ class TaskWorker:
             model_path=self.config.BOX_DETECTOR_MODEL_PATH,
             test_ratio=self.config.BOX_DETECTOR_TEST_RATIO,
             epochs=self.config.TRAINING_EPOCHS,
-            augment_shift_regular=self.config.EXTRACT_AUGMENT_SHIFT_REGULAR,
-            augment_shift_blueprint=self.config.EXTRACT_AUGMENT_SHIFT_BLUEPRINT,
+            augment_shift_regular=self.config.augment_shifts_regular,
+            augment_shift_blueprint=self.config.augment_shifts_blueprint,
             augment_fill=self.config.EXTRACT_AUGMENT_FILL,
             augment_count=self.config.EXTRACT_AUGMENT_COUNT,
+            test_blueprint_fraction=self.config.BOX_DETECTOR_TEST_BLUEPRINT_FRACTION,
+            scale_regular=self.config.EXTRACT_REGULAR_SCALE,
+            scale_blueprint=self.config.EXTRACT_BLUEPRINT_SCALE,
         )
         self.running = False
 
@@ -199,8 +202,8 @@ class TaskWorker:
                 X_test, y_test = _build_arrays(
                     test_sources,
                     augment=True,
-                    shift_regular=config.EXTRACT_AUGMENT_SHIFT_REGULAR,
-                    shift_blueprint=config.EXTRACT_AUGMENT_SHIFT_BLUEPRINT,
+                    shift_regular=config.augment_shifts_regular,
+                    shift_blueprint=config.augment_shifts_blueprint,
                     fill_mode=config.EXTRACT_AUGMENT_FILL,
                     augment_count=config.EXTRACT_AUGMENT_COUNT,
                 )
@@ -237,8 +240,8 @@ class TaskWorker:
                             test_sources,
                             config.EXTRACT_REGULAR_SCALE,
                             config.EXTRACT_BLUEPRINT_SCALE,
-                            config.EXTRACT_AUGMENT_SHIFT_REGULAR,
-                            config.EXTRACT_AUGMENT_SHIFT_BLUEPRINT,
+                            config.augment_shifts_regular,
+                            config.augment_shifts_blueprint,
                             config.EXTRACT_AUGMENT_FILL,
                             config.EXTRACT_AUGMENT_COUNT,
                         )
@@ -332,12 +335,13 @@ class TaskWorker:
             preview_result = eval_run_preview(
                 data_dir,
                 self.config.BOX_DETECTOR_TEST_RATIO,
-                self.config.EXTRACT_AUGMENT_SHIFT_REGULAR,
-                self.config.EXTRACT_AUGMENT_SHIFT_BLUEPRINT,
+                self.config.augment_shifts_regular,
+                self.config.augment_shifts_blueprint,
                 self.config.EXTRACT_AUGMENT_FILL,
                 self.config.EXTRACT_AUGMENT_COUNT,
                 self.config.EXTRACT_REGULAR_SCALE,
                 self.config.EXTRACT_BLUEPRINT_SCALE,
+                self.config.BOX_DETECTOR_TEST_BLUEPRINT_FRACTION,
             )
             elapsed_ms = int((time.perf_counter() - t0) * 1000)
             if "error" not in preview_result:
@@ -467,21 +471,23 @@ class TaskWorker:
                 result = eval_run_evaluate(
                     data_dir=data_dir,
                     test_ratio=self.config.BOX_DETECTOR_TEST_RATIO,
-                    shift_regular=self.config.EXTRACT_AUGMENT_SHIFT_REGULAR,
-                    shift_blueprint=self.config.EXTRACT_AUGMENT_SHIFT_BLUEPRINT,
+                    shift_regular=self.config.augment_shifts_regular,
+                    shift_blueprint=self.config.augment_shifts_blueprint,
                     fill_mode=self.config.EXTRACT_AUGMENT_FILL,
                     augment_count=self.config.EXTRACT_AUGMENT_COUNT,
+                    test_blueprint_fraction=self.config.BOX_DETECTOR_TEST_BLUEPRINT_FRACTION,
                 )
             elif eval_type == "preview":
                 result = eval_run_preview(
                     data_dir=data_dir,
                     test_ratio=self.config.BOX_DETECTOR_TEST_RATIO,
-                    shift_regular=self.config.EXTRACT_AUGMENT_SHIFT_REGULAR,
-                    shift_blueprint=self.config.EXTRACT_AUGMENT_SHIFT_BLUEPRINT,
+                    shift_regular=self.config.augment_shifts_regular,
+                    shift_blueprint=self.config.augment_shifts_blueprint,
                     fill_mode=self.config.EXTRACT_AUGMENT_FILL,
                     augment_count=self.config.EXTRACT_AUGMENT_COUNT,
                     scale_regular=self.config.EXTRACT_REGULAR_SCALE,
                     scale_blueprint=self.config.EXTRACT_BLUEPRINT_SCALE,
+                    test_blueprint_fraction=self.config.BOX_DETECTOR_TEST_BLUEPRINT_FRACTION,
                 )
             else:
                 self.update_task_status(

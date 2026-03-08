@@ -1,5 +1,16 @@
 # Development Setup
 
+## Configuration
+
+The API and task worker read configuration from **config.yaml** (no .env). Create it from the template:
+
+```bash
+cp config.yaml.example config.yaml
+```
+
+Edit `config.yaml` as needed (Redis, data paths, extract scale and augmentation, box detector settings). For Docker, `config.yaml` is mounted into the containers; ensure it exists before running `python start.py start`.
+Optionally set `CONFIG_PATH` to an absolute path to use a config file elsewhere.
+
 ## Hot-Reload Development
 
 ### Option 1: Local Development (Recommended for Frontend)

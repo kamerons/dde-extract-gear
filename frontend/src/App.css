@@ -980,6 +980,37 @@
   pointer-events: none;
 }
 
+.extract-config-cropped-area-overlay {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+}
+
+.extract-config-cropped-bar {
+  fill: black;
+}
+
+.extract-config-translation-margin-line {
+  stroke: #e85c0e;
+  stroke-width: 4px;
+  fill: none;
+}
+
+.extract-config-translation-margin-arrow {
+  fill: #e85c0e;
+}
+
+.extract-config-cropped-area-toggle {
+  display: block;
+  margin-bottom: 0.5rem;
+}
+
+.extract-config-shift-label {
+  margin-top: 0.75rem;
+  margin-bottom: 0.25rem;
+}
+
 .extract-config-origin-marker {
   position: absolute;
   width: 8px;
@@ -1065,6 +1096,63 @@
   margin: 0.35rem 0 0 0;
   font-size: 0.875rem;
   color: #555;
+}
+
+.extract-config-sample-augments {
+  margin: 1rem 0 0 0;
+  padding: 0.75rem 0 0 0;
+  border-top: 1px solid #ddd;
+}
+
+.extract-config-sample-augments-hint {
+  margin: 0.25rem 0 0.5rem 0;
+  font-size: 0.875rem;
+  color: #555;
+}
+
+.extract-config-sample-augments-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.extract-config-sample-augments-select {
+  min-width: 12rem;
+  padding: 0.35rem 0.5rem;
+}
+
+.extract-config-sample-augments-count input {
+  width: 3rem;
+  margin-left: 0.35rem;
+  padding: 0.25rem;
+}
+
+.extract-config-sample-augments-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-top: 0.5rem;
+}
+
+.extract-config-sample-augments-cell {
+  flex: 0 0 auto;
+}
+
+.extract-config-sample-augments-label {
+  margin: 0 0 0.25rem 0;
+  font-size: 0.8rem;
+  color: #555;
+}
+
+.extract-config-sample-augments-img {
+  display: block;
+  max-width: 180px;
+  max-height: 180px;
+  object-fit: contain;
+  border: 1px solid #ccc;
+  border-radius: 4px;
 }
 
 .extract-config-training-samples {
@@ -1368,6 +1456,13 @@
 .extract-config-preview-index {
   font-size: 0.9rem;
   color: #666;
+}
+
+.extract-config-preview-index-augment {
+  display: block;
+  font-size: 0.75rem;
+  color: #888;
+  margin-top: 0.15rem;
 }
 
 /* Preview wrap: exact size so image and overlay stay in sync; sidebar scrolls if needed */

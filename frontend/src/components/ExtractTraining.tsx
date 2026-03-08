@@ -274,6 +274,7 @@ export function ExtractTraining() {
               showAugmentPreview={false}
               preferUnlabeledRandom={true}
               onOriginSaved={loadTrainingDataCounts}
+              showCroppedAreaOption={true}
             />
           )}
           {(modelSubTab === 'digit' || modelSubTab === 'type') && (

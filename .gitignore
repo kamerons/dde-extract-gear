@@ -11,3 +11,4 @@ data/models/
 venv/
 .venv/
 .env
+config.yaml

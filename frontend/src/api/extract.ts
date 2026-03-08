@@ -20,15 +20,38 @@ export interface ExtractBox {
   type: 'card' | 'set' | 'stat' | 'level';
 }
 
+/** One segment of translation margin line (cropped pixel coords); arrow is drawn at (x2, y2) (crop edge). */
+export interface TranslationMarginLineSegment {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
+export interface TranslationMarginLines {
+  left: TranslationMarginLineSegment;
+  top: TranslationMarginLineSegment;
+  right: TranslationMarginLineSegment;
+  bottom: TranslationMarginLineSegment;
+}
+
 export interface BoxesResponse {
   boxes: ExtractBox[];
+  translation_margin_lines?: TranslationMarginLines;
+}
+
+export interface AugmentShiftBounds {
+  x_neg: number;
+  x_pos: number;
+  y_neg: number;
+  y_pos: number;
 }
 
 export interface ExtractConfigResponse {
   regular_scale: number;
   blueprint_scale: number;
-  augment_shift_regular: number;
-  augment_shift_blueprint: number;
+  augment_shift_regular: AugmentShiftBounds;
+  augment_shift_blueprint: AugmentShiftBounds;
   augment_fill: string;
   augment_count: number;
   preview_every_n_epochs: number;
@@ -36,7 +59,7 @@ export interface ExtractConfigResponse {
 }
 
 /**
- * Fetch extract pipeline config from the server (scale and augmentation from env).
+ * Fetch extract pipeline config from the server (scale and augmentation from config.yaml).
  */
 export async function getExtractConfig(): Promise<ExtractConfigResponse> {
   const response = await fetch(`${API_BASE_URL}/api/extract/config`);
@@ -77,6 +100,26 @@ export async function saveOrigin(
     }
     throw new Error(message);
   }
+}
+
+/**
+ * Fetch the saved origin (origin_x, origin_y) for a labeled screenshot.
+ * Returns the values stored in the companion .txt file.
+ * Throws if the screenshot has no saved origin (e.g. 404).
+ */
+export async function getScreenshotOrigin(
+  filename: string,
+  subdir: string
+): Promise<{ origin_x: number; origin_y: number }> {
+  const params = new URLSearchParams({ subdir });
+  const response = await fetch(
+    `${API_BASE_URL}/api/extract/screenshots/${encodeURIComponent(filename)}/origin?${params}`
+  );
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Failed to get origin: ${response.status} ${text}`);
+  }
+  return response.json();
 }
 
 /**
@@ -122,34 +165,46 @@ export async function getTrainingDataCounts(): Promise<TrainingDataCountsRespons
 
 /**
  * Return the URL for loading a screenshot image.
+ * When crop is true and subdir is labeled/screenshots/regular or blueprint, the image is cropped (matches training preview coords).
  */
 export function getScreenshotUrl(
   filename: string,
-  subdir: string = EXTRACT_SUBDIRS.unlabeled
+  subdir: string = EXTRACT_SUBDIRS.unlabeled,
+  options?: { crop?: boolean }
 ): string {
   const params = new URLSearchParams({ subdir });
+  if (options?.crop) {
+    params.set('crop', '1');
+  }
   return `${API_BASE_URL}/api/extract/screenshots/${encodeURIComponent(filename)}?${params}`;
 }
 
 /**
  * Compute region boxes for the first card given origin, scale, and image type.
  * Returns boxes in full-resolution coordinates; scale to 50% in the UI for display.
+ * When imageWidth and imageHeight are provided, response includes translation_margin_lines (cropped pixel coords).
  */
 export async function fetchBoxes(
   originX: number,
   originY: number,
   scale: number,
-  imageType: ImageType
+  imageType: ImageType,
+  options?: { imageWidth?: number; imageHeight?: number }
 ): Promise<BoxesResponse> {
+  const body: Record<string, unknown> = {
+    origin_x: originX,
+    origin_y: originY,
+    scale,
+    image_type: imageType,
+  };
+  if (options?.imageWidth != null && options?.imageHeight != null) {
+    body.image_width = options.imageWidth;
+    body.image_height = options.imageHeight;
+  }
   const response = await fetch(`${API_BASE_URL}/api/extract/boxes`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      origin_x: originX,
-      origin_y: originY,
-      scale,
-      image_type: imageType,
-    }),
+    body: JSON.stringify(body),
   });
   if (!response.ok) {
     const text = await response.text();
@@ -274,6 +329,14 @@ export interface TrainingPreviewItem {
   origin_y: number;
   pred_x: number;
   pred_y: number;
+  /** Precomputed GT boxes in the same coordinate space as the preview image (backend sends so frontend just renders). */
+  boxes_gt?: ExtractBox[];
+  /** Precomputed predicted boxes in the same coordinate space as the preview image. */
+  boxes_pred?: ExtractBox[];
+  /** When set, use this as the image src (augmented sample embedded in preview). */
+  image_data_url?: string;
+  /** 1-based index of this augment for the same source (for display). */
+  augment_index?: number;
 }
 
 export interface TrainingPreviewResponse {

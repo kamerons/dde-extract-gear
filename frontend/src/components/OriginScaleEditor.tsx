@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   listScreenshots,
   getScreenshotUrl,
+  getScreenshotOrigin,
   fetchBoxes,
   getExtractConfig,
   saveOrigin,
@@ -9,6 +10,7 @@ import {
   type ImageType,
   type ExtractBox,
   type ExtractConfigResponse,
+  type TranslationMarginLines,
 } from '../api/extract';
 
 const DISPLAY_SCALE = 0.5;
@@ -24,6 +26,8 @@ export interface OriginScaleEditorProps {
   preferUnlabeledRandom?: boolean;
   /** Called after origin is saved successfully; e.g. parent can refetch training data counts. */
   onOriginSaved?: () => void;
+  /** When true (e.g. Training tab), show "Show cropped area" checkbox; when checked, overlay black bars and replace Origin/Scale with config form. */
+  showCroppedAreaOption?: boolean;
 }
 
 type SubdirItem = { subdir: string; filename: string; hasOrigin: boolean };
@@ -34,6 +38,7 @@ export function OriginScaleEditor({
   showAugmentPreview = false,
   preferUnlabeledRandom = false,
   onOriginSaved,
+  showCroppedAreaOption = false,
 }: OriginScaleEditorProps) {
   const [imageType, setImageType] = useState<ImageType>('regular');
   const [filenames, setFilenames] = useState<string[]>([]);
@@ -44,12 +49,29 @@ export function OriginScaleEditor({
   const [regularScale, setRegularScale] = useState<number>(1.0);
   const [blueprintScale, setBlueprintScale] = useState<number>(1.0);
   const [boxes, setBoxes] = useState<ExtractBox[]>([]);
+  const [marginLines, setMarginLines] = useState<TranslationMarginLines | null>(null);
   const [boxesError, setBoxesError] = useState<string | null>(null);
   const [imageNaturalSize, setImageNaturalSize] = useState<{ width: number; height: number } | null>(null);
   const [extractConfig, setExtractConfig] = useState<ExtractConfigResponse | null>(null);
   const [saveStatus, setSaveStatus] = useState<'success' | 'error' | null>(null);
   const [saveErrorMessage, setSaveErrorMessage] = useState<string | null>(null);
   const [previewAugment, setPreviewAugment] = useState<boolean>(false);
+  const [showCroppedArea, setShowCroppedArea] = useState<boolean>(false);
+  const [localConfig, setLocalConfig] = useState<{
+    regular_scale: number;
+    blueprint_scale: number;
+    augment_fill: string;
+    augment_count: number;
+    augment_shift_regular: ExtractConfigResponse['augment_shift_regular'];
+    augment_shift_blueprint: ExtractConfigResponse['augment_shift_blueprint'];
+  }>({
+    regular_scale: 1.0,
+    blueprint_scale: 1.0,
+    augment_fill: 'black',
+    augment_count: 3,
+    augment_shift_regular: { x_neg: 0.15, x_pos: 0.15, y_neg: 0.15, y_pos: 0.15 },
+    augment_shift_blueprint: { x_neg: 0.2, x_pos: 0.2, y_neg: 0.2, y_pos: 0.2 },
+  });
   const imageRef = useRef<HTMLImageElement | null>(null);
   const previewCanvasPosRef = useRef<HTMLCanvasElement | null>(null);
   const previewCanvasNegRef = useRef<HTMLCanvasElement | null>(null);
@@ -160,35 +182,56 @@ export function OriginScaleEditor({
   }, [preferUnlabeledRandom, loadScreenshots, loadBothAndSelectRandomUnlabeled]);
 
   useEffect(() => {
-    if (!showScaleInput || showAugmentPreview) {
+    if (!showScaleInput || showAugmentPreview || showCroppedAreaOption) {
       getExtractConfig()
         .then(setExtractConfig)
         .catch((e) => console.error('Failed to fetch extract config', e));
     }
-  }, [showScaleInput, showAugmentPreview]);
+  }, [showScaleInput, showAugmentPreview, showCroppedAreaOption]);
+
+  useEffect(() => {
+    if (!extractConfig) return;
+    setLocalConfig({
+      regular_scale: extractConfig.regular_scale,
+      blueprint_scale: extractConfig.blueprint_scale,
+      augment_fill: extractConfig.augment_fill,
+      augment_count: extractConfig.augment_count,
+      augment_shift_regular: { ...extractConfig.augment_shift_regular },
+      augment_shift_blueprint: { ...extractConfig.augment_shift_blueprint },
+    });
+  }, [extractConfig]);
 
   useEffect(() => {
     if (!selectedFilename) {
       setBoxes([]);
+      setMarginLines(null);
       setBoxesError(null);
       return;
     }
     let cancelled = false;
     setBoxesError(null);
-    fetchBoxes(originX, originY, currentScale, imageType)
+    const opts =
+      imageNaturalSize != null
+        ? { imageWidth: imageNaturalSize.width, imageHeight: imageNaturalSize.height }
+        : undefined;
+    fetchBoxes(originX, originY, currentScale, imageType, opts)
       .then((res) => {
-        if (!cancelled) setBoxes(res.boxes);
+        if (!cancelled) {
+          setBoxes(res.boxes);
+          setMarginLines(res.translation_margin_lines ?? null);
+        }
       })
       .catch((err) => {
         if (!cancelled) {
           setBoxesError(err instanceof Error ? err.message : 'Failed to fetch boxes');
           setBoxes([]);
+          setMarginLines(null);
         }
       });
     return () => {
       cancelled = true;
     };
-  }, [originX, originY, currentScale, imageType, selectedFilename]);
+  }, [originX, originY, currentScale, imageType, selectedFilename, imageNaturalSize]);
 
   // Draw augmentation preview when showAugmentPreview is on and image is loaded
   useEffect(() => {
@@ -204,11 +247,14 @@ export function OriginScaleEditor({
     const img = imageRef.current;
     const w = img.naturalWidth;
     const h = img.naturalHeight;
-    const shiftFrac =
+    const bounds =
       imageType === 'blueprint'
         ? extractConfig.augment_shift_blueprint
         : extractConfig.augment_shift_regular;
-    const maxPx = Math.max(1, Math.round(shiftFrac * Math.min(w, h)));
+    const dxNeg = -Math.max(0, Math.round(w * bounds.x_neg));
+    const dyNeg = -Math.max(0, Math.round(h * bounds.y_neg));
+    const dxPos = Math.max(0, Math.round(w * bounds.x_pos));
+    const dyPos = Math.max(0, Math.round(h * bounds.y_pos));
 
     const drawShifted = (canvas: HTMLCanvasElement | null, dx: number, dy: number) => {
       if (!canvas) return;
@@ -221,8 +267,8 @@ export function OriginScaleEditor({
       ctx.drawImage(img, dx, dy);
     };
 
-    drawShifted(previewCanvasPosRef.current, maxPx, maxPx);
-    drawShifted(previewCanvasNegRef.current, -maxPx, -maxPx);
+    drawShifted(previewCanvasNegRef.current, dxNeg, dyNeg);
+    drawShifted(previewCanvasPosRef.current, dxPos, dyPos);
   }, [
     showAugmentPreview,
     previewAugment,
@@ -284,6 +330,34 @@ export function OriginScaleEditor({
     screenshotSubdir === EXTRACT_SUBDIRS.blueprint;
   const canSaveOrigin = isLabeledSubdir && selectedFilename != null;
   const showLabelBadges = isLabeledSubdir && filenames.length > 0;
+
+  // When user selects a different screenshot, load its saved origin if it has one.
+  useEffect(() => {
+    if (!selectedFilename || !isLabeledSubdir) return;
+    if (!hasOriginSet.has(selectedFilename)) {
+      setOriginX(0);
+      setOriginY(0);
+      return;
+    }
+    let cancelled = false;
+    getScreenshotOrigin(selectedFilename, screenshotSubdir)
+      .then(({ origin_x, origin_y }) => {
+        if (!cancelled) {
+          setOriginX(origin_x);
+          setOriginY(origin_y);
+        }
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          console.error('Failed to load saved origin', e);
+          setOriginX(0);
+          setOriginY(0);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedFilename, screenshotSubdir, isLabeledSubdir, hasOriginSet]);
 
   const handleImageKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -370,7 +444,19 @@ export function OriginScaleEditor({
       )}
       <div className="configuration-section extract-config-origin-layout">
         <div className="extract-config-origin-form">
-          <p className="stat-section-label">Set origin and scale</p>
+          {showCroppedAreaOption && (
+            <label className="extract-config-form-label extract-config-cropped-area-toggle">
+              <input
+                type="checkbox"
+                checked={showCroppedArea}
+                onChange={(e) => setShowCroppedArea(e.target.checked)}
+              />
+              Show cropped area
+            </label>
+          )}
+          <p className="stat-section-label">
+            {showCroppedArea ? 'Extract config (for this image type)' : 'Set origin and scale'}
+          </p>
           <label className="extract-config-form-label">
             Image type
             <select
@@ -429,50 +515,132 @@ export function OriginScaleEditor({
               ))}
             </div>
           </div>
-          <label className="extract-config-form-label">
-            Origin X (px)
-            <input
-              type="number"
-              value={originX}
-              onChange={(e) => setOriginX(Number(e.target.value) || 0)}
-              className="extract-config-number"
-            />
-          </label>
-          <label className="extract-config-form-label">
-            Origin Y (px)
-            <input
-              type="number"
-              value={originY}
-              onChange={(e) => setOriginY(Number(e.target.value) || 0)}
-              className="extract-config-number"
-            />
-          </label>
-          {showSaveOriginButton && canSaveOrigin && (
-            <button
-              type="button"
-              className="extract-config-save-button"
-              onClick={handleSaveOrigin}
-            >
-              Save origin
-            </button>
-          )}
-          {showScaleInput && (
-            <label className="extract-config-form-label">
-              Scale ({imageType === 'blueprint' ? 'blueprint' : 'regular'})
-              <input
-                type="number"
-                min={0.1}
-                max={3}
-                step={0.01}
-                value={imageType === 'blueprint' ? blueprintScale : regularScale}
-                onChange={(e) => {
-                  const v = Number(e.target.value);
-                  if (imageType === 'blueprint') setBlueprintScale(v);
-                  else setRegularScale(v);
-                }}
-                className="extract-config-number"
-              />
-            </label>
+          {showCroppedArea ? (
+            <>
+              {extractConfig == null && (
+                <p className="stat-section-description" role="status">Loading config…</p>
+              )}
+              <label className="extract-config-form-label">
+                Scale ({imageType === 'blueprint' ? 'blueprint' : 'regular'})
+                <input
+                  type="number"
+                  min={0.1}
+                  max={3}
+                  step={0.01}
+                  value={imageType === 'blueprint' ? localConfig.blueprint_scale : localConfig.regular_scale}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    setLocalConfig((prev) =>
+                      imageType === 'blueprint'
+                        ? { ...prev, blueprint_scale: v }
+                        : { ...prev, regular_scale: v }
+                    );
+                  }}
+                  className="extract-config-number"
+                />
+              </label>
+              <label className="extract-config-form-label">
+                Augment fill
+                <select
+                  value={localConfig.augment_fill}
+                  onChange={(e) => setLocalConfig((prev) => ({ ...prev, augment_fill: e.target.value }))}
+                  className="extract-config-select"
+                >
+                  <option value="black">black</option>
+                  <option value="noise">noise</option>
+                </select>
+              </label>
+              <label className="extract-config-form-label">
+                Augment count
+                <input
+                  type="number"
+                  min={1}
+                  max={100}
+                  value={localConfig.augment_count}
+                  onChange={(e) =>
+                    setLocalConfig((prev) => ({ ...prev, augment_count: Number(e.target.value) || 1 }))
+                  }
+                  className="extract-config-number"
+                />
+              </label>
+              <p className="stat-section-label extract-config-shift-label">
+                Shift bounds
+              </p>
+              {(['x_neg', 'x_pos', 'y_neg', 'y_pos'] as const).map((key) => {
+                const bounds = imageType === 'blueprint' ? localConfig.augment_shift_blueprint : localConfig.augment_shift_regular;
+                return (
+                  <label key={key} className="extract-config-form-label">
+                    {key}
+                    <input
+                      type="number"
+                      min={0}
+                      max={1}
+                      step={0.01}
+                      value={bounds[key]}
+                      onChange={(e) => {
+                        const v = Number(e.target.value);
+                        setLocalConfig((prev) => ({
+                          ...prev,
+                          [imageType === 'blueprint' ? 'augment_shift_blueprint' : 'augment_shift_regular']: {
+                            ...(imageType === 'blueprint' ? prev.augment_shift_blueprint : prev.augment_shift_regular),
+                            [key]: v,
+                          },
+                        }));
+                      }}
+                      className="extract-config-number"
+                    />
+                  </label>
+                );
+              })}
+            </>
+          ) : (
+            <>
+              <label className="extract-config-form-label">
+                Origin X (px)
+                <input
+                  type="number"
+                  value={originX}
+                  onChange={(e) => setOriginX(Number(e.target.value) || 0)}
+                  className="extract-config-number"
+                />
+              </label>
+              <label className="extract-config-form-label">
+                Origin Y (px)
+                <input
+                  type="number"
+                  value={originY}
+                  onChange={(e) => setOriginY(Number(e.target.value) || 0)}
+                  className="extract-config-number"
+                />
+              </label>
+              {showSaveOriginButton && canSaveOrigin && (
+                <button
+                  type="button"
+                  className="extract-config-save-button"
+                  onClick={handleSaveOrigin}
+                >
+                  Save origin
+                </button>
+              )}
+              {showScaleInput && (
+                <label className="extract-config-form-label">
+                  Scale ({imageType === 'blueprint' ? 'blueprint' : 'regular'})
+                  <input
+                    type="number"
+                    min={0.1}
+                    max={3}
+                    step={0.01}
+                    value={imageType === 'blueprint' ? blueprintScale : regularScale}
+                    onChange={(e) => {
+                      const v = Number(e.target.value);
+                      if (imageType === 'blueprint') setBlueprintScale(v);
+                      else setRegularScale(v);
+                    }}
+                    className="extract-config-number"
+                  />
+                </label>
+              )}
+            </>
           )}
           {boxesError && (
             <p className="configuration-error" role="alert">
@@ -528,7 +696,52 @@ export function OriginScaleEditor({
                 ))}
               </svg>
             )}
-            {originX !== 0 || originY !== 0 ? (
+            {showCroppedArea && extractConfig != null && imageNaturalSize && displayWidth > 0 && displayHeight > 0 && (() => {
+              const bounds = imageType === 'blueprint' ? localConfig.augment_shift_blueprint : localConfig.augment_shift_regular;
+              const leftW = displayWidth * bounds.x_neg;
+              const rightW = displayWidth * bounds.x_pos;
+              const topH = displayHeight * bounds.y_neg;
+              const bottomH = displayHeight * bounds.y_pos;
+              const scaleToDisplay = displayWidth / imageNaturalSize.width;
+              const toDisplayX = (cx: number) => leftW + cx * scaleToDisplay;
+              const toDisplayY = (cy: number) => topH + cy * scaleToDisplay;
+              return (
+                <svg
+                  className="extract-config-cropped-area-overlay"
+                  width={displayWidth}
+                  height={displayHeight}
+                  style={{ position: 'absolute', left: 0, top: 0, pointerEvents: 'none' }}
+                  aria-hidden
+                >
+                  <defs>
+                    <marker
+                      id="extract-config-margin-arrow"
+                      markerWidth={10}
+                      markerHeight={10}
+                      refX={9}
+                      refY={3}
+                      orient="auto"
+                      markerUnits="strokeWidth"
+                    >
+                      <path d="M0,0 L0,6 L9,3 z" className="extract-config-translation-margin-arrow" />
+                    </marker>
+                  </defs>
+                  <rect x={0} y={0} width={leftW} height={displayHeight} className="extract-config-cropped-bar" />
+                  <rect x={displayWidth - rightW} y={0} width={rightW} height={displayHeight} className="extract-config-cropped-bar" />
+                  <rect x={0} y={0} width={displayWidth} height={topH} className="extract-config-cropped-bar" />
+                  <rect x={0} y={displayHeight - bottomH} width={displayWidth} height={bottomH} className="extract-config-cropped-bar" />
+                  {marginLines && (
+                    <>
+                      <line x1={toDisplayX(marginLines.left.x1)} y1={toDisplayY(marginLines.left.y1)} x2={toDisplayX(marginLines.left.x2)} y2={toDisplayY(marginLines.left.y2)} className="extract-config-translation-margin-line" markerEnd="url(#extract-config-margin-arrow)" />
+                      <line x1={toDisplayX(marginLines.top.x1)} y1={toDisplayY(marginLines.top.y1)} x2={toDisplayX(marginLines.top.x2)} y2={toDisplayY(marginLines.top.y2)} className="extract-config-translation-margin-line" markerEnd="url(#extract-config-margin-arrow)" />
+                      <line x1={toDisplayX(marginLines.right.x1)} y1={toDisplayY(marginLines.right.y1)} x2={toDisplayX(marginLines.right.x2)} y2={toDisplayY(marginLines.right.y2)} className="extract-config-translation-margin-line" markerEnd="url(#extract-config-margin-arrow)" />
+                      <line x1={toDisplayX(marginLines.bottom.x1)} y1={toDisplayY(marginLines.bottom.y1)} x2={toDisplayX(marginLines.bottom.x2)} y2={toDisplayY(marginLines.bottom.y2)} className="extract-config-translation-margin-line" markerEnd="url(#extract-config-margin-arrow)" />
+                    </>
+                  )}
+                </svg>
+              );
+            })()}
+            {!showCroppedArea && (originX !== 0 || originY !== 0) ? (
               <div
                 className="extract-config-origin-marker"
                 style={{
@@ -558,10 +771,8 @@ export function OriginScaleEditor({
             Preview augmentation
           </label>
           <p className="stat-section-description">
-            Shows how the current shift level ({imageType === 'blueprint'
-              ? extractConfig.augment_shift_blueprint
-              : extractConfig.augment_shift_regular}{' '}
-            for {imageType}) will affect this image (positive and negative shift). Uses black fill.
+            Shows how the current shift bounds (x_neg, x_pos, y_neg, y_pos for {imageType}) will
+            affect this image. Left: negative shift; right: positive shift. Uses black fill.
           </p>
           {previewAugment && imageNaturalSize && (
             <div className="extract-config-preview-grid">

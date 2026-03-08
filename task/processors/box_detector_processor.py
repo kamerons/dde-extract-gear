@@ -18,7 +18,8 @@ import numpy as np
 from PIL import Image
 
 from shared.box_detector_augment import (
-    augment_sample,
+    augment_sample_label_aware,
+    crop_to_inner_rect,
     read_txt_origin,
 )
 from shared.recommendation_engine import TaskCancelledError
@@ -94,16 +95,33 @@ def _scan_sources(labeled_dirs: list[tuple[str, Path]]) -> list[tuple[str, str, 
 def _split_train_test(
     sources: list[tuple[str, str, Path, int, int]],
     test_ratio: float,
+    test_blueprint_fraction: float = 0.5,
 ) -> tuple[list[tuple[str, str, Path, int, int]], list[tuple[str, str, Path, int, int]]]:
-    """Deterministic split: sort by (type, name), take last test_ratio as test."""
+    """
+    Stratified split so test set is ~50% blueprint (configurable via test_blueprint_fraction).
+    Splits regular and blueprint separately; takes last N of each so test has the desired ratio.
+    """
     if not sources:
         return [], []
-    ordered = sorted(sources, key=lambda s: (s[0], s[1]))
-    n = len(ordered)
-    n_test = max(0, int(n * test_ratio))
-    n_train = n - n_test
-    train = ordered[:n_train] if n_train else []
-    test = ordered[n_train:] if n_test else []
+    regular = sorted([s for s in sources if s[0] == "regular"], key=lambda s: s[1])
+    blueprint = sorted([s for s in sources if s[0] == "blueprint"], key=lambda s: s[1])
+    n_regular, n_blueprint = len(regular), len(blueprint)
+    total = n_regular + n_blueprint
+    n_test_total = max(0, int(total * test_ratio))
+    if n_test_total == 0:
+        return sources, []
+    # Target half blueprint in test when possible
+    n_test_blueprint = min(n_blueprint, max(0, int(n_test_total * test_blueprint_fraction)))
+    n_test_regular = min(n_regular, n_test_total - n_test_blueprint)
+    if n_test_regular < 0:
+        n_test_regular = 0
+        n_test_blueprint = min(n_blueprint, n_test_total)
+    train_regular = regular[:-n_test_regular] if n_test_regular else regular
+    test_regular = regular[-n_test_regular:] if n_test_regular else []
+    train_blueprint = blueprint[:-n_test_blueprint] if n_test_blueprint else blueprint
+    test_blueprint = blueprint[-n_test_blueprint:] if n_test_blueprint else []
+    train = train_regular + train_blueprint
+    test = test_regular + test_blueprint
     return train, test
 
 
@@ -115,32 +133,54 @@ def _load_image(png_path: Path) -> Image.Image:
 def _build_arrays(
     sources: list[tuple[str, str, Path, int, int]],
     augment: bool,
-    shift_regular: float,
-    shift_blueprint: float,
+    shift_regular: tuple[float, float, float, float],
+    shift_blueprint: tuple[float, float, float, float],
     fill_mode: str,
     augment_count: int,
+    scale_regular: float = 1.0,
+    scale_blueprint: float = 1.0,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Build X (N, H, W, 3) and y (N, 2) in resized space. Optionally augment train set."""
+    """
+    Build X (N, H, W, 3) and y (N, 2) in resized space.
+    Crop using config bounds first; labels (uncropped) are transformed to cropped coords.
+    shift_* are (x_neg, x_pos, y_neg, y_pos) and define the crop only. Augmentation translation
+    is limited by geometry (label + box in cropped space), not by these fractions.
+    """
     X_list = []
     y_list = []
     for typename, _name, png_path, ox, oy in sources:
         img = _load_image(png_path)
-        w, h = img.size
-        scale_x = INPUT_WIDTH / w
-        scale_y = INPUT_HEIGHT / h
-        shift_fraction = shift_regular if typename == "regular" else shift_blueprint
+        # Crop margins only; augmentation uses geometric limits (label + box), not these values.
+        x_neg, x_pos, y_neg, y_pos = shift_regular if typename == "regular" else shift_blueprint
+        cropped, crop_left, crop_top = crop_to_inner_rect(img, x_neg, x_pos, y_neg, y_pos)
+        cw, ch = cropped.size
+        origin_crop_x = ox - crop_left
+        origin_crop_y = oy - crop_top
+        scale_x = INPUT_WIDTH / cw
+        scale_y = INPUT_HEIGHT / ch
+        scale = scale_blueprint if typename == "blueprint" else scale_regular
 
         if augment:
-            for aug_img, new_ox, new_oy in augment_sample(
-                img, ox, oy, shift_fraction, fill_mode, augment_count
+            for aug_img, new_ox, new_oy in augment_sample_label_aware(
+                cropped,
+                origin_crop_x,
+                origin_crop_y,
+                x_neg,
+                x_pos,
+                y_neg,
+                y_pos,
+                fill_mode,
+                augment_count,
+                scale=scale,
+                image_type=typename,
             ):
                 arr = np.array(aug_img.resize((INPUT_WIDTH, INPUT_HEIGHT)), dtype=np.float32) / 255.0
                 X_list.append(arr)
                 y_list.append([new_ox * scale_x, new_oy * scale_y])
         else:
-            arr = np.array(img.resize((INPUT_WIDTH, INPUT_HEIGHT)), dtype=np.float32) / 255.0
+            arr = np.array(cropped.resize((INPUT_WIDTH, INPUT_HEIGHT)), dtype=np.float32) / 255.0
             X_list.append(arr)
-            y_list.append([ox * scale_x, oy * scale_y])
+            y_list.append([origin_crop_x * scale_x, origin_crop_y * scale_y])
 
     if not X_list:
         return np.zeros((0, INPUT_HEIGHT, INPUT_WIDTH, 3), dtype=np.float32), np.zeros((0, 2), dtype=np.float32)
@@ -237,19 +277,25 @@ class BoxDetectorProcessor:
         model_path: str,
         test_ratio: float,
         epochs: int,
-        augment_shift_regular: float,
-        augment_shift_blueprint: float,
+        augment_shift_regular: tuple[float, float, float, float],
+        augment_shift_blueprint: tuple[float, float, float, float],
         augment_fill: str,
         augment_count: int,
+        test_blueprint_fraction: float = 0.5,
+        scale_regular: float = 1.0,
+        scale_blueprint: float = 1.0,
     ):
         self.data_dir = Path(data_dir) if not isinstance(data_dir, Path) else data_dir
         self.model_path = model_path
         self.test_ratio = test_ratio
+        self.test_blueprint_fraction = test_blueprint_fraction
         self.epochs = epochs
         self.augment_shift_regular = augment_shift_regular
         self.augment_shift_blueprint = augment_shift_blueprint
         self.augment_fill = augment_fill
         self.augment_count = augment_count
+        self.scale_regular = scale_regular
+        self.scale_blueprint = scale_blueprint
         self._repo = _repo_root()
         self._data_dir_abs = (self._repo / self.data_dir).resolve()
 
@@ -280,7 +326,9 @@ class BoxDetectorProcessor:
                 "message": "No (image, .txt) pairs found.",
             }
 
-        train_initial, test_initial = _split_train_test(sources_initial, self.test_ratio)
+        train_initial, test_initial = _split_train_test(
+            sources_initial, self.test_ratio, self.test_blueprint_fraction
+        )
         if len(train_initial) == 0:
             return {
                 "error": "no_train_sources",
@@ -317,7 +365,9 @@ class BoxDetectorProcessor:
             sources_now = _scan_sources(labeled_now)
             if not sources_now:
                 continue
-            train_sources, test_sources = _split_train_test(sources_now, self.test_ratio)
+            train_sources, test_sources = _split_train_test(
+                sources_now, self.test_ratio, self.test_blueprint_fraction
+            )
             if not train_sources:
                 train_sources = train_initial
 
@@ -328,6 +378,8 @@ class BoxDetectorProcessor:
                 shift_blueprint=self.augment_shift_blueprint,
                 fill_mode=self.augment_fill,
                 augment_count=self.augment_count,
+                scale_regular=self.scale_regular,
+                scale_blueprint=self.scale_blueprint,
             )
             X_test_aug, y_test_aug = _build_arrays(
                 test_sources,
@@ -336,6 +388,8 @@ class BoxDetectorProcessor:
                 shift_blueprint=self.augment_shift_blueprint,
                 fill_mode=self.augment_fill,
                 augment_count=self.augment_count,
+                scale_regular=self.scale_regular,
+                scale_blueprint=self.scale_blueprint,
             )
 
             if X_train.shape[0] == 0:
@@ -382,7 +436,9 @@ class BoxDetectorProcessor:
         # Final split from current sources for last metrics
         labeled_final = _labeled_dirs(self._data_dir_abs)
         sources_final = _scan_sources(labeled_final)
-        _, test_sources_final = _split_train_test(sources_final, self.test_ratio)
+        _, test_sources_final = _split_train_test(
+            sources_final, self.test_ratio, self.test_blueprint_fraction
+        )
         X_test_final, y_test_final = _build_arrays(
             test_sources_final,
             augment=True,
@@ -390,6 +446,8 @@ class BoxDetectorProcessor:
             shift_blueprint=self.augment_shift_blueprint,
             fill_mode=self.augment_fill,
             augment_count=self.augment_count,
+            scale_regular=self.scale_regular,
+            scale_blueprint=self.scale_blueprint,
         )
 
         # Save final model: timestamped + legacy (always under data dir)

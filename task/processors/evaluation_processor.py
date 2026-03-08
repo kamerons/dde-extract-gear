@@ -2,9 +2,12 @@
 
 Used by the task worker for evaluation_tasks. Resolves load path, loads model
 with .keras vs HDF5 format detection and logging, then runs evaluate (metrics)
-or preview (test set items with predictions).
+or preview (test set items with predictions). Preview includes augmented test
+samples with embedded images so the frontend can show model performance on each.
 """
 
+import base64
+import io
 import logging
 import shutil
 import tempfile
@@ -12,6 +15,11 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+from PIL import Image
+
+from shared.box_detector_augment import augment_sample_label_aware, crop_to_inner_rect
+from shared.extract_regions import compute_boxes
 from task.processors.box_detector_processor import (
     INPUT_HEIGHT,
     INPUT_WIDTH,
@@ -80,46 +88,101 @@ def _load_box_detector_model(load_path: Path) -> tuple[Any, str]:
         tmp_path.unlink(missing_ok=True)
 
 
+def _image_to_data_url(pil_img: Image.Image) -> str:
+    """Encode PIL image as PNG data URL."""
+    buf = io.BytesIO()
+    pil_img.save(buf, format="PNG")
+    b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+    return f"data:image/png;base64,{b64}"
+
+
 def build_preview_items(
     model: Any,
     test_sources: list,
     scale_regular: float,
     scale_blueprint: float,
-    shift_regular: float,
-    shift_blueprint: float,
+    shift_regular: tuple[float, float, float, float],
+    shift_blueprint: tuple[float, float, float, float],
     fill_mode: str,
     augment_count: int,
 ) -> tuple[list[dict], float, float]:
     """
     Build preview items from an already-loaded model and test sources.
-    Returns (items, scale_regular, scale_blueprint). Items have filename, subdir, origin_x, origin_y, pred_x, pred_y.
+    Generates augment_count augmented samples per test source (same as training),
+    runs the model on each, and returns one item per augmented sample with
+    image_data_url so the frontend can show each augment and its GT/pred.
+    Origin and prediction are in the augmented (cropped) image space.
+    Returns (items, scale_regular, scale_blueprint).
     """
-    X_test, _ = _build_arrays(
-        test_sources,
-        augment=False,
-        shift_regular=shift_regular,
-        shift_blueprint=shift_blueprint,
-        fill_mode=fill_mode,
-        augment_count=augment_count,
-    )
+    samples = []  # (aug_img, origin_x, origin_y, filename, subdir, augment_index)
+    X_list = []
+    for typename, filename, png_path, ox, oy in test_sources:
+        img = _load_image(png_path)
+        x_neg, x_pos, y_neg, y_pos = shift_regular if typename == "regular" else shift_blueprint
+        cropped, crop_left, crop_top = crop_to_inner_rect(img, x_neg, x_pos, y_neg, y_pos)
+        cw, ch = cropped.size
+        origin_crop_x = ox - crop_left
+        origin_crop_y = oy - crop_top
+        scale_x = INPUT_WIDTH / cw
+        scale_y = INPUT_HEIGHT / ch
+        subdir = f"labeled/screenshots/{typename}"
+        image_type_here = typename
+        scale_here = scale_blueprint if typename == "blueprint" else scale_regular
+        for aug_idx, (aug_img, new_ox, new_oy) in enumerate(
+            augment_sample_label_aware(
+                cropped,
+                origin_crop_x,
+                origin_crop_y,
+                x_neg,
+                x_pos,
+                y_neg,
+                y_pos,
+                fill_mode,
+                augment_count,
+                scale=scale_here,
+                image_type=image_type_here,
+            )
+        ):
+            samples.append((aug_img, new_ox, new_oy, filename, subdir, aug_idx + 1))
+            arr = np.array(aug_img.resize((INPUT_WIDTH, INPUT_HEIGHT)), dtype=np.float32) / 255.0
+            X_list.append(arr)
+    if not X_list:
+        return ([], scale_regular, scale_blueprint)
+    X_test = np.stack(X_list)
     pred = model.predict(X_test, verbose=0)
 
     items = []
-    for i, (typename, filename, png_path, ox, oy) in enumerate(test_sources):
-        img = _load_image(png_path)
-        w, h = img.size
-        scale_x = INPUT_WIDTH / w
-        scale_y = INPUT_HEIGHT / h
+    for i, (aug_img, orig_x, orig_y, filename, subdir, aug_idx) in enumerate(samples):
+        cw, ch = aug_img.size
+        scale_x = INPUT_WIDTH / cw
+        scale_y = INPUT_HEIGHT / ch
         pred_x = int(round(float(pred[i, 0]) / scale_x))
         pred_y = int(round(float(pred[i, 1]) / scale_y))
-        subdir = f"labeled/screenshots/{typename}"
+        image_type = "blueprint" if "blueprint" in subdir else "regular"
+        scale = scale_blueprint if image_type == "blueprint" else scale_regular
+        boxes_gt = compute_boxes(
+            origin_x=int(orig_x),
+            origin_y=int(orig_y),
+            scale=scale,
+            image_type=image_type,
+        )
+        boxes_pred = compute_boxes(
+            origin_x=pred_x,
+            origin_y=pred_y,
+            scale=scale,
+            image_type=image_type,
+        )
         items.append({
             "filename": filename,
             "subdir": subdir,
-            "origin_x": ox,
-            "origin_y": oy,
+            "origin_x": orig_x,
+            "origin_y": orig_y,
             "pred_x": pred_x,
             "pred_y": pred_y,
+            "boxes_gt": boxes_gt,
+            "boxes_pred": boxes_pred,
+            "image_data_url": _image_to_data_url(aug_img),
+            "augment_index": aug_idx,
         })
     return (items, scale_regular, scale_blueprint)
 
@@ -127,10 +190,11 @@ def build_preview_items(
 def run_evaluate(
     data_dir: Path,
     test_ratio: float,
-    shift_regular: float,
-    shift_blueprint: float,
+    shift_regular: tuple[float, float, float, float],
+    shift_blueprint: tuple[float, float, float, float],
     fill_mode: str,
     augment_count: int,
+    test_blueprint_fraction: float = 0.5,
 ) -> dict[str, Any]:
     """
     Run evaluate: load model, build test set, return metrics dict.
@@ -152,7 +216,7 @@ def run_evaluate(
     sources = _scan_sources(labeled)
     if not sources:
         return {"error": "no_sources", "message": "No valid (image, .txt) pairs found."}
-    _, test_sources = _split_train_test(sources, test_ratio)
+    _, test_sources = _split_train_test(sources, test_ratio, test_blueprint_fraction)
     if not test_sources:
         return {"error": "no_test_set", "message": "No test set after split."}
 
@@ -181,12 +245,13 @@ def run_evaluate(
 def run_preview(
     data_dir: Path,
     test_ratio: float,
-    shift_regular: float,
-    shift_blueprint: float,
+    shift_regular: tuple[float, float, float, float],
+    shift_blueprint: tuple[float, float, float, float],
     fill_mode: str,
     augment_count: int,
     scale_regular: float,
     scale_blueprint: float,
+    test_blueprint_fraction: float = 0.5,
 ) -> dict[str, Any]:
     """
     Run preview: load model, build test set, predict, return items + scales.
@@ -208,7 +273,7 @@ def run_preview(
     sources = _scan_sources(labeled)
     if not sources:
         return {"error": "no_sources", "message": "No valid (image, .txt) pairs found."}
-    _, test_sources = _split_train_test(sources, test_ratio)
+    _, test_sources = _split_train_test(sources, test_ratio, test_blueprint_fraction)
     if not test_sources:
         return {"error": "no_test_set", "message": "No test set after split."}
 

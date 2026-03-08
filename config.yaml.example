@@ -1,0 +1,48 @@
+# Copy to config.yaml and adjust. config.yaml is required at startup (no .env fallback).
+# For Docker, mount config.yaml into the container (e.g. ../config.yaml:/app/config.yaml).
+
+redis:
+  host: redis
+  port: 6379
+  db: 0
+  # password: null  # optional; can override via REDIS_PASSWORD env
+
+data:
+  file_path: data/collected.json
+  dir: data
+
+api:
+  host: 0.0.0.0
+  port: 8000
+
+extract:
+  regular_scale: 1.0
+  blueprint_scale: 1.0
+  augment:
+    fill: black  # black | noise
+    count: 3
+    # Crop margins only: max fraction of full image discarded per side (0-1). Augmentation
+    # translation is geometric (label + box size in cropped space), not capped by these values.
+    regular:
+      x_neg: 0.15
+      x_pos: 0.28
+      y_neg: 0.02
+      y_pos: 0.02
+    blueprint:
+      x_neg: 0.11
+      x_pos: 0.39
+      y_neg: 0.02
+      y_pos: 0.02
+
+# Box detector training and evaluation
+box_detector:
+  test_ratio: 0.2
+  test_blueprint_fraction: 0.5  # Fraction of test set that is blueprint (rest regular); 0.5 = 50% blueprint
+  model_path: data/models/box_detector/box_detector_model
+  training_epochs: 1000
+  preview_every_n_epochs: 20
+  preview_expected_duration_ms: 10000
+  preview_ms_per_image: 244  # used for expected duration estimate
+
+task:
+  evaluation_worker_count: 4

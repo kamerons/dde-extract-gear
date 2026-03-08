@@ -79,16 +79,22 @@ export function TrainingPreview({ latestPreview }: TrainingPreviewProps) {
   const imageType = item ? subdirToImageType(item.subdir) : 'regular';
   const scale = imageType === 'blueprint' ? displayScaleBlueprint : displayScaleRegular;
 
-  // Reset image state when switching to another item
+  // Reset image state when switching to another item (use index so augments of same source reset)
   useEffect(() => {
     setImageSize(null);
     setImageError(null);
-  }, [item?.filename, item?.subdir]);
+  }, [safeIndex, item?.filename, item?.subdir, item?.augment_index]);
 
+  // Use backend-provided boxes when present; otherwise fall back to fetchBoxes (e.g. old cached previews).
   useEffect(() => {
     if (!item) {
       setBoxesGt([]);
       setBoxesPred([]);
+      return;
+    }
+    if (item.boxes_gt != null && item.boxes_pred != null) {
+      setBoxesGt(item.boxes_gt);
+      setBoxesPred(item.boxes_pred);
       return;
     }
     let cancelled = false;
@@ -176,6 +182,11 @@ export function TrainingPreview({ latestPreview }: TrainingPreviewProps) {
         </button>
         <span className="extract-config-preview-index">
           {safeIndex + 1} / {displayItems.length}
+          {item?.augment_index != null && (
+            <span className="extract-config-preview-index-augment">
+              {' '}({item.filename} · augment {item.augment_index})
+            </span>
+          )}
         </span>
         <button
           type="button"
@@ -200,8 +211,8 @@ export function TrainingPreview({ latestPreview }: TrainingPreviewProps) {
           </p>
         )}
         <img
-          src={getScreenshotUrl(item.filename, item.subdir)}
-          alt={`Test sample ${safeIndex + 1}`}
+          src={item.image_data_url ?? getScreenshotUrl(item.filename, item.subdir, { crop: true })}
+          alt={item.augment_index != null ? `Test sample ${safeIndex + 1} (augment ${item.augment_index})` : `Test sample ${safeIndex + 1}`}
           className="extract-config-preview-image"
           style={{
             width: displayWidth || undefined,

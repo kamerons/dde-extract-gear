@@ -17,17 +17,11 @@ services:
       context: ..
       dockerfile: docker/Dockerfile.api
     container_name: armor_select_api
-    env_file:
-      - ../.env
     ports:
       - "8000:8000"
-    environment:
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - REDIS_DB=0
-      - DATA_FILE_PATH=data/collected.json
     volumes:
       - ../data:/app/data
+      - ../config.yaml:/app/config.yaml
     depends_on:
       redis:
         condition: service_healthy
@@ -48,15 +42,9 @@ services:
       context: ..
       dockerfile: docker/Dockerfile.task
     container_name: armor_select_task
-    env_file:
-      - ../.env
-    environment:
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - REDIS_DB=0
-      - DATA_FILE_PATH=data/collected.json
     volumes:
       - ../data:/app/data
+      - ../config.yaml:/app/config.yaml
     depends_on:
       redis:
         condition: service_healthy

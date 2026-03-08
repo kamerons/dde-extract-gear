@@ -1,14 +1,17 @@
 """Extract pipeline endpoints: screenshots, region boxes, and box detector training."""
 
+import io
 import logging
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
+from PIL import Image
 from pydantic import BaseModel
 
 from api.config import Config
 from api.services.task_service import TaskService
+from shared.box_detector_augment import compute_translation_margin_lines, crop_to_inner_rect
 from shared.extract_regions import compute_boxes
 
 logger = logging.getLogger(__name__)
@@ -111,6 +114,8 @@ class BoxesRequest(BaseModel):
     origin_y: int
     scale: float
     image_type: str  # "regular" | "blueprint"
+    image_width: int | None = None
+    image_height: int | None = None
 
 
 class SaveOriginRequest(BaseModel):
@@ -125,14 +130,16 @@ class SaveOriginRequest(BaseModel):
 @router.get("/api/extract/config")
 async def get_extract_config():
     """
-    Return extract pipeline config from env (scale and augmentation).
-    Used by the frontend for .env display and augmentation preview.
+    Return extract pipeline config from config.yaml (scale and augmentation).
+    Used by the frontend for config display and augmentation preview.
     """
+    r = config.augment_shifts_regular
+    b = config.augment_shifts_blueprint
     return {
         "regular_scale": config.EXTRACT_REGULAR_SCALE,
         "blueprint_scale": config.EXTRACT_BLUEPRINT_SCALE,
-        "augment_shift_regular": config.EXTRACT_AUGMENT_SHIFT_REGULAR,
-        "augment_shift_blueprint": config.EXTRACT_AUGMENT_SHIFT_BLUEPRINT,
+        "augment_shift_regular": {"x_neg": r[0], "x_pos": r[1], "y_neg": r[2], "y_pos": r[3]},
+        "augment_shift_blueprint": {"x_neg": b[0], "x_pos": b[1], "y_neg": b[2], "y_pos": b[3]},
         "augment_fill": config.EXTRACT_AUGMENT_FILL,
         "augment_count": config.EXTRACT_AUGMENT_COUNT,
         "preview_every_n_epochs": config.PREVIEW_EVERY_N_EPOCHS,
@@ -242,17 +249,78 @@ async def list_screenshots(
     return out
 
 
+def _serve_cropped_image(path: Path, subdir: str):
+    """Load image, apply config crop for subdir (labeled/screenshots/regular or blueprint), return PNG bytes."""
+    img = Image.open(path).convert("RGB")
+    if subdir == "labeled/screenshots/regular":
+        bounds = config.augment_shifts_regular
+    elif subdir == "labeled/screenshots/blueprint":
+        bounds = config.augment_shifts_blueprint
+    else:
+        raise HTTPException(status_code=400, detail="Crop only allowed for labeled/screenshots/regular or blueprint")
+    x_neg, x_pos, y_neg, y_pos = bounds
+    cropped, _, _ = crop_to_inner_rect(img, x_neg, x_pos, y_neg, y_pos)
+    buf = io.BytesIO()
+    cropped.save(buf, format="PNG")
+    buf.seek(0)
+    return buf.getvalue()
+
+
+@router.get("/api/extract/screenshots/{filename}/origin")
+async def get_screenshot_origin(
+    filename: str,
+    subdir: str,
+):
+    """
+    Return the saved origin (origin_x, origin_y) for a labeled screenshot.
+    Reads the companion .txt file. Returns 404 if the file has no saved origin.
+    """
+    if subdir not in LABELED_SCREENSHOT_SUBDIRS_WRITABLE:
+        raise HTTPException(
+            status_code=400,
+            detail="subdir must be labeled/screenshots/regular or labeled/screenshots/blueprint",
+        )
+    if "/" in filename or "\\" in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    base = (_data_dir() / subdir).resolve()
+    path = (base / filename).resolve()
+    try:
+        path.relative_to(base)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    txt_path = path.with_suffix(".txt")
+    if not txt_path.exists():
+        raise HTTPException(status_code=404, detail="No saved origin for this screenshot")
+    try:
+        line = txt_path.read_text().strip()
+        parts = line.split()
+        if len(parts) != 2:
+            raise HTTPException(status_code=500, detail="Invalid origin file format")
+        origin_x = int(parts[0])
+        origin_y = int(parts[1])
+    except (OSError, ValueError) as e:
+        if isinstance(e, HTTPException):
+            raise
+        logger.exception("Failed to read origin .txt")
+        raise HTTPException(status_code=500, detail="Failed to read origin") from e
+    return {"origin_x": origin_x, "origin_y": origin_y}
+
+
 @router.get("/api/extract/screenshots/{filename}")
 async def serve_screenshot(
     filename: str,
     subdir: str = "unlabeled/screenshots",
+    crop: bool = False,
 ):
-    """Serve a single screenshot image."""
+    """Serve a single screenshot image. If crop=true and subdir is labeled/screenshots/regular or blueprint, return cropped image (matches training preview coords)."""
     if "/" in filename or "\\" in filename:
         raise HTTPException(status_code=400, detail="Invalid filename")
     path = _screenshot_path(filename, subdir)
     if not path.exists():
         raise HTTPException(status_code=404, detail="Screenshot not found")
+    if crop and subdir in ("labeled/screenshots/regular", "labeled/screenshots/blueprint"):
+        body = _serve_cropped_image(path, subdir)
+        return Response(content=body, media_type="image/png")
     return FileResponse(path, media_type="image/png")
 
 
@@ -276,7 +344,36 @@ async def post_boxes(body: BoxesRequest):
         scale=body.scale,
         image_type=body.image_type,
     )
-    return {"boxes": boxes}
+    result: dict = {"boxes": boxes}
+    if (
+        body.image_width is not None
+        and body.image_height is not None
+        and body.image_width > 0
+        and body.image_height > 0
+    ):
+        bounds = (
+            config.augment_shifts_blueprint
+            if body.image_type == "blueprint"
+            else config.augment_shifts_regular
+        )
+        scale = (
+            config.EXTRACT_BLUEPRINT_SCALE
+            if body.image_type == "blueprint"
+            else config.EXTRACT_REGULAR_SCALE
+        )
+        result["translation_margin_lines"] = compute_translation_margin_lines(
+            origin_x=body.origin_x,
+            origin_y=body.origin_y,
+            image_w=body.image_width,
+            image_h=body.image_height,
+            x_neg=bounds[0],
+            x_pos=bounds[1],
+            y_neg=bounds[2],
+            y_pos=bounds[3],
+            scale=scale,
+            image_type=body.image_type,
+        )
+    return result
 
 
 class TrainingStartRequest(BaseModel):

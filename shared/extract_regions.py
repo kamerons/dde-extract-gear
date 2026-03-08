@@ -225,3 +225,28 @@ def compute_boxes(
         {"x": b.x, "y": b.y, "width": b.width, "height": b.height, "type": b.type}
         for b in boxes
     ]
+
+
+def compute_detection_extents(scale: float, image_type: str) -> tuple[int, int, int, int]:
+    """
+    Return how far the full detection box (all regions) extends from the origin
+    in each direction: (left_extent, top_extent, right_extent, bottom_extent) in pixels.
+
+    Used to clamp augmentation translation so the entire box stays in frame, and to
+    show the "safe origin" rectangle in the UI (origin can be placed anywhere inside
+    that rectangle and the full box will stay within the cropped image).
+
+    Computed by placing origin at (0, 0) and taking the bounding box of all regions.
+    """
+    boxes = compute_boxes(origin_x=0, origin_y=0, scale=scale, image_type=image_type)
+    if not boxes:
+        return (0, 0, 0, 0)
+    min_x = min(b["x"] for b in boxes)
+    min_y = min(b["y"] for b in boxes)
+    max_right = max(b["x"] + b["width"] for b in boxes)
+    max_bottom = max(b["y"] + b["height"] for b in boxes)
+    left_extent = max(0, -min_x)
+    top_extent = max(0, -min_y)
+    right_extent = max_right
+    bottom_extent = max_bottom
+    return (left_extent, top_extent, right_extent, bottom_extent)

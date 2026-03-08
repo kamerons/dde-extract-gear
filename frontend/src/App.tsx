@@ -1,13 +1,12 @@
 import { useState } from 'react';
 import { InitialConfiguration } from './components/InitialConfiguration';
 import { ResultsScreen } from './components/ResultsScreen';
-import { ExtractConfig } from './components/ExtractConfig';
 import { ExtractTraining } from './components/ExtractTraining';
 import type { BuildPreferences } from './types';
 import './App.css';
 
 type View = 'configuration' | 'results';
-type Tab = 'recommendations' | 'training' | 'configuration';
+type Tab = 'recommendations' | 'training';
 
 function App() {
   const [currentView, setCurrentView] = useState<View>('configuration');
@@ -54,14 +53,6 @@ function App() {
         >
           Training
         </button>
-        <button
-          type="button"
-          className={`app-tab ${activeTab === 'configuration' ? 'app-tab-active' : ''}`}
-          onClick={() => setActiveTab('configuration')}
-          aria-current={activeTab === 'configuration' ? 'page' : undefined}
-        >
-          Configuration
-        </button>
       </nav>
       <main
         className={`app-tab-panel${activeTab === 'training' ? ' app-tab-panel--training' : ''}`}
@@ -74,7 +65,6 @@ function App() {
           />
         )}
         {activeTab === 'training' && <ExtractTraining />}
-        {activeTab === 'configuration' && <ExtractConfig />}
       </main>
     </div>
   );
