@@ -20,7 +20,7 @@ extract:
   blueprint_scale: 1.0
   augment:
     fill: black  # black | noise
-    count: 3
+    count: 7
     # Crop margins only: max fraction of full image discarded per side (0-1). Augmentation
     # translation is geometric (label + box size in cropped space), not capped by these values.
     regular:
@@ -36,7 +36,7 @@ extract:
 
 # Box detector training and evaluation
 box_detector:
-  test_ratio: 0.2
+  test_ratio: 0.25
   test_blueprint_fraction: 0.5  # Fraction of test set that is blueprint (rest regular); 0.5 = 50% blueprint
   model_path: data/models/box_detector/box_detector_model
   training_epochs: 1000

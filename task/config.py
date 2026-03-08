@@ -48,11 +48,11 @@ class Config:
 
     EXTRACT_AUGMENT_COUNT: int = max(
         1,
-        min(int(get_nested(_config_data, "extract", "augment", "count", default=3)), 100),
+        min(int(get_nested(_config_data, "extract", "augment", "count", default=7)), 100),
     )
 
     # Box detector training
-    BOX_DETECTOR_TEST_RATIO: float = float(get_nested(_config_data, "box_detector", "test_ratio", default=0.2))
+    BOX_DETECTOR_TEST_RATIO: float = float(get_nested(_config_data, "box_detector", "test_ratio", default=0.25))
     BOX_DETECTOR_TEST_BLUEPRINT_FRACTION: float = float(
         get_nested(_config_data, "box_detector", "test_blueprint_fraction", default=0.5)
     )

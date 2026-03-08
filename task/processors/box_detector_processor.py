@@ -421,6 +421,20 @@ class BoxDetectorProcessor:
             if progress_callback:
                 progress_callback(epoch, self.epochs, metrics)
 
+            # 100% test accuracy: save model and quit
+            if metrics.get("accuracy_within_5px", 0) >= 1.0:
+                timestamped_name = stem + "_" + datetime.now().strftime("%Y%m%d_%H%M%S") + ".keras"
+                timestamped_path = save_dir / timestamped_name
+                legacy_path = save_dir / (stem + ".keras")
+                logger.info("100%% test accuracy reached at epoch %d; saving model to %s and %s", epoch, timestamped_path, legacy_path)
+                _save_model_native(model, timestamped_path)
+                _save_model_native(model, legacy_path)
+                out_metrics = dict(metrics)
+                out_metrics["epochs"] = epoch
+                out_metrics["status"] = "completed"
+                out_metrics["stopped_early_100"] = True
+                return out_metrics
+
             # Save checkpoint every 10 epochs (and on last epoch) so eval thread can load it
             save_checkpoint = (epoch % 10 == 0) or (epoch == self.epochs)
             if save_checkpoint:

@@ -13,6 +13,7 @@ from api.config import Config
 from api.services.task_service import TaskService
 from shared.box_detector_augment import compute_translation_margin_lines, crop_to_inner_rect
 from shared.extract_regions import compute_boxes
+from task.processors.evaluation_processor import run_evaluate_all_labeled
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +126,27 @@ class SaveOriginRequest(BaseModel):
     subdir: str  # labeled/screenshots/regular | labeled/screenshots/blueprint
     origin_x: int
     origin_y: int
+
+
+@router.get("/api/extract/model-metrics")
+async def get_model_metrics():
+    """
+    Compute metrics for the loaded box detector model on all labeled images (no train/test split).
+    Returns accuracy_within_5px, test_mae_x, test_mae_y. Frontend may label these as (estimate).
+    """
+    data_dir = _data_dir()
+    result = run_evaluate_all_labeled(
+        data_dir,
+        shift_regular=config.augment_shifts_regular,
+        shift_blueprint=config.augment_shifts_blueprint,
+        fill_mode=config.EXTRACT_AUGMENT_FILL,
+        augment_count=config.EXTRACT_AUGMENT_COUNT,
+        scale_regular=config.EXTRACT_REGULAR_SCALE,
+        scale_blueprint=config.EXTRACT_BLUEPRINT_SCALE,
+    )
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result.get("message", result.get("error", "Unknown error")))
+    return result
 
 
 @router.get("/api/extract/config")

@@ -248,6 +248,16 @@ export interface EvaluateResponse {
 }
 
 /**
+ * Fetch metrics for the currently loaded box detector model (computed live on all labeled images).
+ * Returns null on 404 or error. Frontend should display values as (estimate).
+ */
+export async function getLoadedModelMetrics(): Promise<EvaluateResponse | null> {
+  const response = await fetch(`${API_BASE_URL}/api/extract/model-metrics`);
+  if (!response.ok) return null;
+  return response.json();
+}
+
+/**
  * Start a box detector training task. Poll with getTrainingTaskStatus(task_id).
  */
 export async function startTraining(): Promise<TrainingStartResponse> {

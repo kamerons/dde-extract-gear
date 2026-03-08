@@ -6,6 +6,7 @@ import {
   getTrainingTaskStatus,
   getExtractConfig,
   getTrainingDataCounts,
+  getLoadedModelMetrics,
   type TrainingTaskStatus,
   type EvaluateResponse,
   type TrainingPreviewResponse,
@@ -75,6 +76,7 @@ export function ExtractTraining() {
   const [previewWaitStart, setPreviewWaitStart] = useState<number | null>(null);
   const [circleProgress, setCircleProgress] = useState(0);
   const [trainingDataCounts, setTrainingDataCounts] = useState<TrainingDataCountsResponse | null>(null);
+  const [loadedModelMetrics, setLoadedModelMetrics] = useState<EvaluateResponse | null>(null);
   const trainingPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const prevEvalKeyRef = useRef<string | null>(null);
   const lastEpochWithPreviewRef = useRef<number>(-1);
@@ -94,6 +96,16 @@ export function ExtractTraining() {
       loadTrainingDataCounts();
     }
   }, [modelSubTab, loadTrainingDataCounts]);
+
+  const showLoadedModelMetrics =
+    modelSubTab === 'box_detector' &&
+    (trainingStatus !== 'pending' && trainingStatus !== 'processing');
+  useEffect(() => {
+    if (!showLoadedModelMetrics) return;
+    getLoadedModelMetrics()
+      .then(setLoadedModelMetrics)
+      .catch(() => setLoadedModelMetrics(null));
+  }, [showLoadedModelMetrics, trainingStatus]);
 
   const handleStartTraining = useCallback(async () => {
     setTrainingError(null);
@@ -162,7 +174,11 @@ export function ExtractTraining() {
         }
         const evaluated = res.progress?.evaluated ?? 0;
         const atPreviewEpoch = evaluated > 0 && evaluated % previewEveryN === 0;
-        if (res.latest_preview != null && res.latest_preview.items?.length) {
+        const hasPreview =
+          res.latest_preview != null &&
+          Array.isArray(res.latest_preview.items) &&
+          res.latest_preview.items.length > 0;
+        if (hasPreview) {
           if (atPreviewEpoch && lastEpochWithPreviewRef.current < evaluated) {
             const waitStart = previewWaitStartRef.current;
             if (typeof waitStart === 'number') {
@@ -173,7 +189,7 @@ export function ExtractTraining() {
             previewWaitStartRef.current = null;
             setPreviewWaitStart(null);
           }
-          setLatestPreview(res.latest_preview);
+          setLatestPreview(res.latest_preview ?? null);
         }
         if (atPreviewEpoch && lastEpochWithPreviewRef.current < evaluated) {
           const now = Date.now();
@@ -370,6 +386,20 @@ export function ExtractTraining() {
             <p className="extract-config-training-status" role="status">
               Training was cancelled.
             </p>
+          )}
+          {showLoadedModelMetrics && (
+            <div className="extract-config-loaded-model-metrics" role="status">
+              <p className="stat-section-label">Loaded model</p>
+              {loadedModelMetrics ? (
+                <ul>
+                  <li>Test MAE X (estimate): {loadedModelMetrics.test_mae_x.toFixed(4)}</li>
+                  <li>Test MAE Y (estimate): {loadedModelMetrics.test_mae_y.toFixed(4)}</li>
+                  <li>Accuracy within 5px (estimate): {(loadedModelMetrics.accuracy_within_5px * 100).toFixed(2)}%</li>
+                </ul>
+              ) : (
+                <p className="extract-config-no-metrics">No metrics for loaded model</p>
+              )}
+            </div>
           )}
           {trainingStatus === 'processing' && latestEval && (
             <div className="extract-config-evaluate-results" role="status">

@@ -52,11 +52,11 @@ class Config:
 
     EXTRACT_AUGMENT_COUNT: int = max(
         1,
-        min(int(get_nested(_config_data, "extract", "augment", "count", default=3)), 100),
+        min(int(get_nested(_config_data, "extract", "augment", "count", default=7)), 100),
     )
 
     # Box detector (for extract routes / config endpoint)
-    BOX_DETECTOR_TEST_RATIO: float = float(get_nested(_config_data, "box_detector", "test_ratio", default=0.2))
+    BOX_DETECTOR_TEST_RATIO: float = float(get_nested(_config_data, "box_detector", "test_ratio", default=0.25))
     BOX_DETECTOR_MODEL_PATH: str = str(
         get_nested(_config_data, "box_detector", "model_path", default="data/box_detector_model")
     )

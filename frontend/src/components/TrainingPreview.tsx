@@ -46,7 +46,9 @@ export function TrainingPreview({ latestPreview }: TrainingPreviewProps) {
           setError(null);
           setIndex((i) => (i >= preview.items.length ? 0 : i));
         } else {
-          setItems([]);
+          // Don't clear existing items when poll returns null (e.g. no preview yet or timing);
+          // keep previous data so we don't flash "Run training to see preview" during training.
+          setItems((prev) => (prev.length > 0 ? prev : []));
         }
       })
       .catch((e) => {
@@ -68,6 +70,18 @@ export function TrainingPreview({ latestPreview }: TrainingPreviewProps) {
       }
     };
   }, [pollLatest]);
+
+  // Sync latestPreview from parent (task status) into local state so we display it immediately
+  // and retain it even if the poll hasn't returned yet or returns null.
+  useEffect(() => {
+    if (latestPreview?.items?.length) {
+      setItems(latestPreview.items);
+      setScaleRegular(latestPreview.scale_regular);
+      setScaleBlueprint(latestPreview.scale_blueprint);
+      setError(null);
+      setIndex((i) => (i >= latestPreview.items.length ? 0 : i));
+    }
+  }, [latestPreview]);
 
   const fromProp = latestPreview?.items?.length ? latestPreview : null;
   const displayItems = fromProp?.items ?? items;

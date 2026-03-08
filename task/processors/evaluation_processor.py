@@ -242,6 +242,57 @@ def run_evaluate(
     return metrics
 
 
+def run_evaluate_all_labeled(
+    data_dir: Path,
+    shift_regular: tuple[float, float, float, float],
+    shift_blueprint: tuple[float, float, float, float],
+    fill_mode: str,
+    augment_count: int,
+    scale_regular: float = 1.0,
+    scale_blueprint: float = 1.0,
+) -> dict[str, Any]:
+    """
+    Compute metrics for the loaded box detector model on all labeled sources (no train/test split).
+    Used by GET /api/extract/model-metrics for "loaded model" accuracy estimate.
+    On error returns {"error": str, "message": str}. On success returns metrics dict.
+    """
+    from task.config import Config
+    cfg = Config()
+    load_path, model_dir, _stem = _box_detector_load_path(data_dir, cfg.BOX_DETECTOR_MODEL_PATH)
+    if load_path is None:
+        return {
+            "error": "model_not_found",
+            "message": f"No box detector model found in {model_dir}. Run training first.",
+        }
+    labeled = _labeled_dirs(data_dir)
+    if not labeled:
+        return {"error": "no_labeled_data", "message": "No labeled screenshots found."}
+    sources = _scan_sources(labeled)
+    if not sources:
+        return {"error": "no_sources", "message": "No valid (image, .txt) pairs found."}
+    try:
+        model, format_str = _load_box_detector_model(load_path)
+    except Exception as e:
+        logger.exception("Failed to load box detector model from %s", load_path)
+        return {
+            "error": "load_failed",
+            "message": f"Keras failed to load model: {e!s}",
+        }
+    X_all, y_all = _build_arrays(
+        sources,
+        augment=True,
+        shift_regular=shift_regular,
+        shift_blueprint=shift_blueprint,
+        fill_mode=fill_mode,
+        augment_count=augment_count,
+        scale_regular=scale_regular,
+        scale_blueprint=scale_blueprint,
+    )
+    metrics = _compute_test_metrics(model, X_all, y_all)
+    metrics["model_format"] = format_str
+    return metrics
+
+
 def run_preview(
     data_dir: Path,
     test_ratio: float,
