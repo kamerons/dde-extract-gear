@@ -69,7 +69,7 @@ Users saw **404** and the message *"Box detector model not found. Run training f
 
 **Files:** `task/processors/evaluation_processor.py`, `task/worker.py`
 
-- **Loading:** All model loading and inference run in the task container; the evaluation processor and training eval loop use **`_load_box_detector_model(load_path)`** (temp copy, format detection).
+- **Loading:** All model loading and inference run in the task container on a single thread; the evaluation processor and training use **`_load_box_detector_model(load_path)`** (temp copy, format detection). Training yields at preview-epoch boundaries when evaluation tasks are pending so only one model is on GPU at a time.
 - **Logging:** When loading, the worker logs e.g. `Loading box detector model from <path> (format: .keras zip)` or `(format: HDF5)`. **UI:** For evaluation tasks, the worker writes `task:{task_id}:model_format` to Redis; the API includes it in `GET /api/tasks/{task_id}`; the frontend can show "Model format: .keras" or "HDF5".
 
 ### API: no model loading
@@ -84,7 +84,7 @@ Users saw **404** and the message *"Box detector model not found. Run training f
    The processor saves with `keras.saving.save_model()` when available so new checkpoints and final models are valid .keras zip files.
 
 2. **Evaluate / preview** (task container only)  
-   The client can call `POST /api/extract/training/evaluate` or `POST .../preview` to run a one-off evaluation task; the API enqueues it and returns `task_id`; the client polls `GET /api/tasks/{task_id}` for results and `model_format`. During **training**, the worker's background eval loop (and on completion) automatically runs the current model on the test set and writes preview data (items, scales) to Redis. The frontend polls `GET /api/extract/training/preview/latest` to get the latest preview and display it; no manual "Run preview" is required.
+   The client can call `POST /api/extract/training/evaluate` or `POST .../preview` to run a one-off evaluation task; the API enqueues it and returns `task_id`; the client polls `GET /api/tasks/{task_id}` for results and `model_format`. Evaluation runs on the **same thread** as training: when evaluation tasks are pending, training yields at the next preview-epoch boundary (checkpoint saved, GPU freed), the worker runs evaluation tasks, then training resumes. During training the processor also builds preview at preview epochs and the worker writes it to Redis. The frontend polls `GET /api/extract/training/preview/latest` to get the latest preview and display it; no manual "Run preview" is required.
 
 3. **Model metrics and results** (task container only)  
    To get metrics and per-image results for a specific model (e.g. when the user selects a model in the UI), the client calls **POST /api/extract/model-evaluation/start** with body `{ "model_id": "<id or null>", "scope": "all" | "test" }`. The API enqueues a `model_evaluation` task and returns `task_id`. The client polls **GET /api/tasks/{task_id}**; when `status` is `completed`, `results` contain `metrics`, `items`, `scale_regular`, and `scale_blueprint`. This ensures the model is loaded and run only in the task container, avoiding API/worker library version mismatch.

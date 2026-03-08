@@ -1,9 +1,8 @@
 ---
 description: Markdown files must use only ASCII; use Unicode escapes for special characters
-globs: "**/*.md"
+globs: *.md
 alwaysApply: false
 ---
-
 # Markdown: ASCII only
 
 Never create or edit Markdown (`.md`) files with non-ASCII characters.

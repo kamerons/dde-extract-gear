@@ -1,10 +1,11 @@
 """Task worker for processing recommendation tasks from Redis."""
 
+import gc
 import json
 import logging
+import os
 import signal
 import sys
-import threading
 import time
 from pathlib import Path
 from typing import Dict, Optional
@@ -12,10 +13,11 @@ from typing import Dict, Optional
 import redis
 from task.config import Config
 from task.processors.recommendation_processor import RecommendationProcessor
-from task.processors.box_detector_processor import BoxDetectorProcessor
+from task.processors.box_detector_processor import BoxDetectorProcessor, _clear_keras_session
 from task.processors.evaluation_processor import (
     run_evaluate as eval_run_evaluate,
     run_evaluate_all_labeled as eval_run_evaluate_all_labeled,
+    run_model_evaluation_combined as eval_run_model_evaluation_combined,
     run_model_results as eval_run_model_results,
     run_preview as eval_run_preview,
 )
@@ -24,19 +26,24 @@ from shared.recommendation_engine import TaskCancelledError
 LATEST_PREVIEW_KEY = "extract:training:latest_preview"
 PREVIEW_TTL = 3600
 
-# Configure logging
+# Configure logging (LOG_LEVEL env: DEBUG, INFO, WARNING, ERROR; default INFO)
+_log_level_name = (os.environ.get("LOG_LEVEL") or "INFO").upper()
+_log_level = getattr(logging, _log_level_name, logging.INFO)
 logging.basicConfig(
-    level=logging.INFO,
+    level=_log_level,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
+# Quiet PIL so LOG_LEVEL=DEBUG doesn't flood with PngImagePlugin STREAM messages
+logging.getLogger("PIL").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 
 class TaskWorker:
     """
     Worker that processes tasks from Redis queues.
-    One long-running slot (training or recommendation, mutually exclusive) plus
-    a pool of evaluation workers that run in parallel.
+    One long-running thread handles training, recommendation, and evaluation;
+    training yields at preview-epoch boundaries when evaluation tasks are pending
+    (checkpoint saved, GPU freed, eval run, then training resumes).
     """
 
     QUEUE_NAME = "recommendation_tasks"
@@ -215,17 +222,66 @@ class TaskWorker:
             cancelled = self.redis_client.get(f"task:{task_id}:cancelled")
             return cancelled == "1"
 
+        def check_pending_evaluation() -> bool:
+            return self.redis_client.llen(self.EVALUATION_QUEUE_NAME) > 0
+
         repo_root = Path(__file__).resolve().parent.parent
 
         try:
             if model_type == "box_detector":
-                results = self.training_processor.process(
-                    task_id=task_id,
-                    progress_callback=progress_callback,
-                    preview_callback=preview_callback,
-                    check_cancelled=check_cancelled,
-                    resume_from_existing=resume_from_existing,
-                )
+                resume_epoch = None
+                use_resume_existing = resume_from_existing
+                while True:
+                    results = self.training_processor.process(
+                        task_id=task_id,
+                        progress_callback=progress_callback,
+                        preview_callback=preview_callback,
+                        check_cancelled=check_cancelled,
+                        resume_from_existing=use_resume_existing,
+                        resume_from_epoch=resume_epoch,
+                        check_pending_evaluation=check_pending_evaluation,
+                    )
+                    if results.get("suspended"):
+                        current_epoch = results.get("next_epoch", 1) - 1
+                        eval_queue_len = self.redis_client.llen(self.EVALUATION_QUEUE_NAME)
+                        logger.info(
+                            "Stopping training at epoch %d to process %d pending evaluation task(s); "
+                            "checkpoint saved. Will resume after evaluation.",
+                            current_epoch,
+                            eval_queue_len,
+                        )
+                        eval_tasks_processed = 0
+                        while self.redis_client.llen(self.EVALUATION_QUEUE_NAME) > 0:
+                            task_data_str = self.redis_client.brpop(
+                                self.EVALUATION_QUEUE_NAME,
+                                timeout=int(self.POLL_INTERVAL),
+                            )
+                            if task_data_str:
+                                _qn, data = task_data_str
+                                self.process_evaluation_task(json.loads(data))
+                                eval_tasks_processed += 1
+                                logger.debug(
+                                    "Processed evaluation task %d of queue; %d left in queue",
+                                    eval_tasks_processed,
+                                    self.redis_client.llen(self.EVALUATION_QUEUE_NAME),
+                                )
+                        logger.info(
+                            "Clearing Keras session before resuming training (processed %d evaluation task(s))",
+                            eval_tasks_processed,
+                        )
+                        # Clear Keras/TF session so GPU memory is released before we load the
+                        # training model; TF's allocator may not fully release after eval cleanup.
+                        _clear_keras_session()
+                        gc.collect()
+                        next_epoch = results.get("next_epoch", 1)
+                        logger.info(
+                            "Resuming training from epoch %d after processing evaluation task(s).",
+                            next_epoch,
+                        )
+                        resume_epoch = next_epoch
+                        use_resume_existing = True
+                        continue
+                    break
             else:
                 self._clear_current_task(self.TRAINING_CURRENT_TASK_KEY)
                 self.update_task_status(
@@ -411,23 +467,7 @@ class TaskWorker:
                 scope = task_data.get("scope", "all")
                 if scope not in ("all", "test"):
                     scope = "all"
-                metrics_result = eval_run_evaluate_all_labeled(
-                    data_dir=data_dir,
-                    shift_regular=self.config.augment_shifts_regular,
-                    shift_blueprint=self.config.augment_shifts_blueprint,
-                    fill_mode=self.config.EXTRACT_AUGMENT_FILL,
-                    augment_count=self.config.EXTRACT_AUGMENT_COUNT,
-                    scale_regular=self.config.EXTRACT_REGULAR_SCALE,
-                    scale_blueprint=self.config.EXTRACT_BLUEPRINT_SCALE,
-                    model_id=model_id,
-                )
-                if "error" in metrics_result:
-                    self.update_task_status(
-                        task_id, "failed",
-                        error=metrics_result.get("message", metrics_result.get("error", "Unknown error")),
-                    )
-                    return
-                results_result = eval_run_model_results(
+                result = eval_run_model_evaluation_combined(
                     data_dir=data_dir,
                     shift_regular=self.config.augment_shifts_regular,
                     shift_blueprint=self.config.augment_shifts_blueprint,
@@ -440,21 +480,12 @@ class TaskWorker:
                     model_id=model_id,
                     scope=scope,
                 )
-                if "error" in results_result:
+                if "error" in result:
                     self.update_task_status(
                         task_id, "failed",
-                        error=results_result.get("message", results_result.get("error", "Unknown error")),
+                        error=result.get("message", result.get("error", "Unknown error")),
                     )
                     return
-                model_format = metrics_result.get("model_format") or results_result.get("model_format")
-                result = {
-                    "metrics": metrics_result,
-                    "items": results_result.get("items", []),
-                    "scale_regular": results_result.get("scale_regular", 1.0),
-                    "scale_blueprint": results_result.get("scale_blueprint", 1.0),
-                }
-                if model_format is not None:
-                    result["model_format"] = model_format
             else:
                 self.update_task_status(
                     task_id, "failed",
@@ -508,28 +539,8 @@ class TaskWorker:
                 logger.error("Unexpected error in long-running slot: %s", e)
                 time.sleep(1)
 
-    def _evaluation_worker_loop(self) -> None:
-        """One of N threads: process evaluation tasks from evaluation_tasks queue."""
-        while self.running:
-            try:
-                task_data_str = self.redis_client.brpop(
-                    self.EVALUATION_QUEUE_NAME,
-                    timeout=int(self.POLL_INTERVAL),
-                )
-                if not task_data_str:
-                    continue
-                _queue_name, data = task_data_str
-                task_data = json.loads(data)
-                self.process_evaluation_task(task_data)
-            except redis.ConnectionError as e:
-                logger.error("Evaluation worker Redis error: %s", e)
-                time.sleep(5)
-            except Exception as e:
-                logger.error("Unexpected error in evaluation worker: %s", e)
-                time.sleep(1)
-
     def run(self) -> None:
-        """Run the worker: one long-running slot thread + evaluation worker pool."""
+        """Run the worker: single long-running thread (training, recommendation, and evaluation)."""
         logger.info("Starting task worker...")
         logger.info("Connecting to Redis at %s:%s", self.config.REDIS_HOST, self.config.REDIS_PORT)
 
@@ -549,24 +560,7 @@ class TaskWorker:
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)
 
-        # Long-running slot: one thread for training or recommendation
-        long_run_thread = threading.Thread(target=self._long_running_loop, daemon=False)
-        long_run_thread.start()
-
-        # Evaluation pool: N threads for evaluate/preview tasks
-        eval_count = self.config.EVALUATION_WORKER_COUNT
-        logger.info("Starting %d evaluation worker(s)", eval_count)
-        eval_threads = [
-            threading.Thread(target=self._evaluation_worker_loop, daemon=False)
-            for _ in range(eval_count)
-        ]
-        for t in eval_threads:
-            t.start()
-
-        long_run_thread.join()
-        for t in eval_threads:
-            t.join()
-
+        self._long_running_loop()
         logger.info("Task worker stopped")
 
 

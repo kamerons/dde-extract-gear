@@ -24,6 +24,7 @@ from task.processors.box_detector_processor import (
     INPUT_HEIGHT,
     INPUT_WIDTH,
     _build_arrays,
+    _clear_keras_session,
     _compute_test_metrics,
     _labeled_dirs,
     _load_image,
@@ -282,17 +283,22 @@ def run_evaluate(
             "message": f"Keras failed to load model: {e!s}",
         }
 
-    X_test, y_test = _build_arrays(
-        test_sources,
-        augment=True,
-        shift_regular=shift_regular,
-        shift_blueprint=shift_blueprint,
-        fill_mode=fill_mode,
-        augment_count=augment_count,
-    )
-    metrics = _compute_test_metrics(model, X_test, y_test)
-    metrics["model_format"] = format_str
-    return metrics
+    try:
+        X_test, y_test = _build_arrays(
+            test_sources,
+            augment=True,
+            shift_regular=shift_regular,
+            shift_blueprint=shift_blueprint,
+            fill_mode=fill_mode,
+            augment_count=augment_count,
+        )
+        metrics = _compute_test_metrics(model, X_test, y_test)
+        metrics["model_format"] = format_str
+        return metrics
+    finally:
+        logger.debug("Releasing evaluation model and clearing Keras session (run_evaluate)")
+        del model
+        _clear_keras_session()
 
 
 def run_evaluate_all_labeled(
@@ -331,19 +337,25 @@ def run_evaluate_all_labeled(
             "error": "load_failed",
             "message": f"Keras failed to load model: {e!s}",
         }
-    X_all, y_all = _build_arrays(
-        sources,
-        augment=True,
-        shift_regular=shift_regular,
-        shift_blueprint=shift_blueprint,
-        fill_mode=fill_mode,
-        augment_count=augment_count,
-        scale_regular=scale_regular,
-        scale_blueprint=scale_blueprint,
-    )
-    metrics = _compute_test_metrics(model, X_all, y_all)
-    metrics["model_format"] = format_str
-    return metrics
+
+    try:
+        X_all, y_all = _build_arrays(
+            sources,
+            augment=True,
+            shift_regular=shift_regular,
+            shift_blueprint=shift_blueprint,
+            fill_mode=fill_mode,
+            augment_count=augment_count,
+            scale_regular=scale_regular,
+            scale_blueprint=scale_blueprint,
+        )
+        metrics = _compute_test_metrics(model, X_all, y_all)
+        metrics["model_format"] = format_str
+        return metrics
+    finally:
+        logger.debug("Releasing evaluation model and clearing Keras session (run_evaluate_all_labeled)")
+        del model
+        _clear_keras_session()
 
 
 def run_preview(
@@ -390,22 +402,27 @@ def run_preview(
             "message": f"Keras failed to load model: {e!s}",
         }
 
-    items, sr, sb = build_preview_items(
-        model,
-        test_sources,
-        scale_regular,
-        scale_blueprint,
-        shift_regular,
-        shift_blueprint,
-        fill_mode,
-        augment_count,
-    )
-    return {
-        "items": items,
-        "scale_regular": sr,
-        "scale_blueprint": sb,
-        "model_format": format_str,
-    }
+    try:
+        items, sr, sb = build_preview_items(
+            model,
+            test_sources,
+            scale_regular,
+            scale_blueprint,
+            shift_regular,
+            shift_blueprint,
+            fill_mode,
+            augment_count,
+        )
+        return {
+            "items": items,
+            "scale_regular": sr,
+            "scale_blueprint": sb,
+            "model_format": format_str,
+        }
+    finally:
+        logger.debug("Releasing evaluation model and clearing Keras session (run_preview)")
+        del model
+        _clear_keras_session()
 
 
 def run_model_results(
@@ -459,18 +476,113 @@ def run_model_results(
             "message": f"Keras failed to load model: {e!s}",
         }
 
-    items, sr, sb = build_preview_items(
-        model,
-        sources_to_use,
-        scale_regular,
-        scale_blueprint,
-        shift_regular,
-        shift_blueprint,
-        fill_mode,
-        aug_count,
-    )
-    return {
-        "items": items,
-        "scale_regular": sr,
-        "scale_blueprint": sb,
-    }
+    try:
+        items, sr, sb = build_preview_items(
+            model,
+            sources_to_use,
+            scale_regular,
+            scale_blueprint,
+            shift_regular,
+            shift_blueprint,
+            fill_mode,
+            aug_count,
+        )
+        return {
+            "items": items,
+            "scale_regular": sr,
+            "scale_blueprint": sb,
+        }
+    finally:
+        logger.debug("Releasing evaluation model and clearing Keras session (run_model_results)")
+        del model
+        _clear_keras_session()
+
+
+def run_model_evaluation_combined(
+    data_dir: Path,
+    shift_regular: tuple[float, float, float, float],
+    shift_blueprint: tuple[float, float, float, float],
+    fill_mode: str,
+    augment_count: int,
+    scale_regular: float = 1.0,
+    scale_blueprint: float = 1.0,
+    test_ratio: float = 0.25,
+    test_blueprint_fraction: float = 0.5,
+    model_id: str | None = None,
+    scope: str = "all",
+) -> dict[str, Any]:
+    """
+    Run model evaluation with a single model load: compute metrics on all labeled
+    and build preview items (scope all/test). Reduces GPU load/clear cycles vs
+    calling run_evaluate_all_labeled + run_model_results separately.
+    On error returns {"error": str, "message": str}.
+    On success returns {"metrics": dict, "items": list, "scale_regular": float,
+    "scale_blueprint": float, "model_format": str}.
+    """
+    load_path, model_dir, _stem = _resolve_load_path(data_dir, model_id)
+    if load_path is None:
+        return {
+            "error": "model_not_found",
+            "message": f"No box detector model found in {model_dir}. Run training first.",
+        }
+    labeled = _labeled_dirs(data_dir)
+    if not labeled:
+        return {"error": "no_labeled_data", "message": "No labeled screenshots found."}
+    sources = _scan_sources(labeled)
+    if not sources:
+        return {"error": "no_sources", "message": "No valid (image, .txt) pairs found."}
+
+    if scope == "test":
+        _, sources_to_use = _split_train_test(sources, test_ratio, test_blueprint_fraction)
+        aug_count = augment_count
+    else:
+        sources_to_use = sources
+        aug_count = 1
+
+    if not sources_to_use:
+        return {"error": "no_test_set", "message": "No test set after split."}
+
+    try:
+        model, format_str = _load_box_detector_model(load_path)
+    except Exception as e:
+        logger.exception("Failed to load box detector model from %s", load_path)
+        return {
+            "error": "load_failed",
+            "message": f"Keras failed to load model: {e!s}",
+        }
+
+    try:
+        X_all, y_all = _build_arrays(
+            sources,
+            augment=True,
+            shift_regular=shift_regular,
+            shift_blueprint=shift_blueprint,
+            fill_mode=fill_mode,
+            augment_count=augment_count,
+            scale_regular=scale_regular,
+            scale_blueprint=scale_blueprint,
+        )
+        metrics = _compute_test_metrics(model, X_all, y_all)
+        metrics["model_format"] = format_str
+
+        items, sr, sb = build_preview_items(
+            model,
+            sources_to_use,
+            scale_regular,
+            scale_blueprint,
+            shift_regular,
+            shift_blueprint,
+            fill_mode,
+            aug_count,
+        )
+        return {
+            "metrics": metrics,
+            "items": items,
+            "scale_regular": sr,
+            "scale_blueprint": sb,
+            "model_format": format_str,
+        }
+    finally:
+        logger.debug("Releasing evaluation model and clearing Keras session (run_model_evaluation_combined)")
+        del model
+        _clear_keras_session()

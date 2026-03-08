@@ -5,7 +5,7 @@ alwaysApply: true
 
 # Python virtual environment
 
-Use the **venv** directory (not `.venv`) for the project’s Python virtual environment.
+Use the **venv** directory (not `.venv`) for the project's Python virtual environment.
 
 - Create: `python -m venv venv`
 - Activate (Unix): `source venv/bin/activate`

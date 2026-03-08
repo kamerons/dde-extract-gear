@@ -253,6 +253,15 @@ def _load_existing_model(load_path: Path):
         tmp_path.unlink(missing_ok=True)
 
 
+def _clear_keras_session() -> None:
+    """Release GPU memory by clearing the default Keras/TF session and graph."""
+    try:
+        from tensorflow import keras
+        keras.backend.clear_session()
+    except Exception as e:
+        logger.warning("Could not clear Keras session: %s", e)
+
+
 def _compute_test_metrics(model, X_test: np.ndarray, y_test: np.ndarray) -> dict:
     """Predict on test set; scale back to pixel space and compute MAE (in input 256 space for simplicity)."""
     if len(X_test) == 0:
@@ -319,12 +328,17 @@ class BoxDetectorProcessor:
         preview_callback: Optional[Callable[[int, dict, dict], None]] = None,
         check_cancelled: Optional[Callable[[], bool]] = None,
         resume_from_existing: bool = False,
+        resume_from_epoch: Optional[int] = None,
+        check_pending_evaluation: Optional[Callable[[], bool]] = None,
     ) -> dict:
         """
         Run box detector training. Re-scans labeled dirs each epoch; train and test sets
         grow as new images are labeled. Test set is augmented for larger evaluation.
         Raises TaskCancelledError if check_cancelled returns True.
-        If resume_from_existing is True, load the existing saved model when present; otherwise build a new one.
+        If resume_from_existing is True (or resume_from_epoch is set), load the existing
+        saved model when present; otherwise build a new one.
+        If check_pending_evaluation returns True at a preview-epoch boundary, checkpoint
+        is already saved; we clear GPU and return {"suspended": True, "next_epoch": ...}.
         """
         labeled = _labeled_dirs(self._data_dir_abs)
         if not labeled:
@@ -357,7 +371,24 @@ class BoxDetectorProcessor:
         save_dir.mkdir(parents=True, exist_ok=True)
         _relax_path_for_host(save_dir, is_dir=True)
 
-        if resume_from_existing:
+        start_epoch = 1
+        if resume_from_epoch is not None and resume_from_epoch > 1:
+            start_epoch = resume_from_epoch
+            logger.debug("Resuming from epoch %d; loading checkpoint", resume_from_epoch)
+            load_path = _resolve_box_detector_load_path(self._data_dir_abs, self.model_path)
+            if load_path is None:
+                return {
+                    "error": "no_checkpoint",
+                    "message": f"No checkpoint found to resume from epoch {resume_from_epoch}.",
+                }
+            try:
+                model = _load_existing_model(load_path)
+            except Exception as e:
+                return {
+                    "error": "resume_failed",
+                    "message": f"Failed to load checkpoint: {e}",
+                }
+        elif resume_from_existing:
             load_path = _resolve_box_detector_load_path(self._data_dir_abs, self.model_path)
             if load_path is not None:
                 try:
@@ -371,7 +402,7 @@ class BoxDetectorProcessor:
         else:
             model = _build_model()
 
-        for epoch in range(1, self.epochs + 1):
+        for epoch in range(start_epoch, self.epochs + 1):
             if check_cancelled and check_cancelled():
                 raise TaskCancelledError()
 
@@ -413,7 +444,7 @@ class BoxDetectorProcessor:
             hist = model.fit(
                 X_train, y_train,
                 epochs=1,
-                batch_size=16,
+                batch_size=4,
                 validation_data=validation_data,
                 verbose=0,
             )
@@ -489,6 +520,20 @@ class BoxDetectorProcessor:
                 _save_model_native(model, current_path)
                 if not current_path.exists():
                     logger.warning("Checkpoint file missing after save: %s", current_path)
+
+            # Yield only at preview epochs (and last epoch): check if we should pause for evaluation
+            if (
+                save_checkpoint
+                and check_pending_evaluation is not None
+                and check_pending_evaluation()
+            ):
+                logger.debug(
+                    "Suspending training at epoch %d: freeing model and clearing Keras session for evaluation",
+                    epoch,
+                )
+                del model
+                _clear_keras_session()
+                return {"suspended": True, "next_epoch": epoch + 1}
 
             if check_cancelled and check_cancelled():
                 raise TaskCancelledError()

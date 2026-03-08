@@ -94,6 +94,9 @@ export function ExtractTraining() {
   const modelEvalRequestIdRef = useRef(0);
   const prevEvalKeyRef = useRef<string | null>(null);
   const lastEpochWithPreviewRef = useRef<number>(-1);
+  const lastEpochWithEvalRequestedRef = useRef<number>(-1);
+  const loadedResultsForModelIdRef = useRef<string | null>(null);
+  const modelIdForRequestRef = useRef<string | null>(null);
   const previewWaitStartRef = useRef<number | null>(null);
   const taskPreviewExpectedDurationMsRef = useRef<number | null>(null);
 
@@ -143,9 +146,17 @@ export function ExtractTraining() {
       }
       return;
     }
+    if (modelEvaluationTaskId != null) return;
+    if (
+      loadedResultsForModelIdRef.current === selectedModelId &&
+      loadedModelMetrics != null
+    ) {
+      return;
+    }
     setLoadedModelError(null);
     setLoadingModelMetrics(true);
     setLoadingModelResults(true);
+    modelIdForRequestRef.current = selectedModelId;
     const requestId = ++modelEvalRequestIdRef.current;
     startModelEvaluationTask(selectedModelId, 'all')
       .then(({ task_id }) => {
@@ -161,7 +172,7 @@ export function ExtractTraining() {
         setLoadingModelMetrics(false);
         setLoadingModelResults(false);
       });
-  }, [showLoadedModelMetrics, selectedModelId]);
+  }, [showLoadedModelMetrics, selectedModelId, modelEvaluationTaskId, loadedModelMetrics]);
 
   useEffect(() => {
     if (!modelEvaluationTaskId) return;
@@ -183,6 +194,9 @@ export function ExtractTraining() {
           }
           modelEvaluationTaskIdRef.current = null;
           setModelEvaluationTaskId(null);
+          if (modelIdForRequestRef.current != null) {
+            loadedResultsForModelIdRef.current = modelIdForRequestRef.current;
+          }
           setLoadedModelMetrics(r.metrics ?? null);
           setLoadedModelResults(
             r.items != null
@@ -322,6 +336,7 @@ export function ExtractTraining() {
         if (res.error) setTrainingError(res.error);
         if (res.status === 'completed' || res.status === 'failed' || res.status === 'cancelled' || res.status === 'not_found') {
           setTrainingTaskId(null);
+          lastEpochWithEvalRequestedRef.current = -1;
         }
       } catch {
         // keep polling
@@ -335,6 +350,40 @@ export function ExtractTraining() {
       trainingPollRef.current = null;
     };
   }, [trainingTaskId, trainingStatus, previewEveryN]);
+
+  useEffect(() => {
+    if (
+      trainingStatus !== 'processing' ||
+      !trainingProgress ||
+      modelEvaluationTaskId != null
+    )
+      return;
+    const evaluated = trainingProgress.evaluated;
+    const atPreviewEpoch =
+      evaluated > 0 && evaluated % previewEveryN === 0;
+    if (!atPreviewEpoch || evaluated <= lastEpochWithEvalRequestedRef.current)
+      return;
+    lastEpochWithEvalRequestedRef.current = evaluated;
+    listModels()
+      .then((list) => {
+        const current = list.find((m) => m.is_current);
+        if (!current) return;
+        modelIdForRequestRef.current = current.id;
+        return startModelEvaluationTask(current.id, 'all');
+      })
+      .then((res) => {
+        if (res) {
+          modelEvaluationTaskIdRef.current = res.task_id;
+          setModelEvaluationTaskId(res.task_id);
+        }
+      })
+      .catch(() => {});
+  }, [
+    trainingStatus,
+    trainingProgress?.evaluated,
+    previewEveryN,
+    modelEvaluationTaskId,
+  ]);
 
   useEffect(() => {
     if (trainingStatus !== 'processing' || !trainingProgress) {

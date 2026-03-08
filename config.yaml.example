@@ -42,6 +42,3 @@ box_detector:
   training_epochs: 1000
   preview_every_n_epochs: 20
   preview_ms_per_image: 244  # used to compute preview_expected_duration_ms for frontend (n_items * this)
-
-task:
-  evaluation_worker_count: 1  # limits GPU parallelism for evaluation tasks

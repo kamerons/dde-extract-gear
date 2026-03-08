@@ -73,11 +73,6 @@ class Config:
         int(get_nested(_config_data, "box_detector", "preview_ms_per_image", default=244)),
     )
 
-    EVALUATION_WORKER_COUNT: int = max(
-        1,
-        min(int(get_nested(_config_data, "task", "evaluation_worker_count", default=4)), 32),
-    )
-
     @property
     def augment_shifts_regular(self) -> tuple[float, float, float, float]:
         """(x_neg, x_pos, y_neg, y_pos) crop margins for regular screenshots; not used to cap translation."""
