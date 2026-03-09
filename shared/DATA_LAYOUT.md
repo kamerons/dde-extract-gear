@@ -11,6 +11,7 @@ Raw or intermediate assets that do not yet have labels:
 | `data/unlabeled/screenshots/001.png`, `002.png`, … | Full-screen captures from the game (e.g. from the screenshot collection script). |
 | `data/unlabeled/icons/001.png`, … | Cropped icon images not yet assigned a stat type. |
 | `data/unlabeled/numbers/001.png`, … | Cropped digit (or blob) images not yet assigned a digit label. |
+| `data/unlabeled/stat_icons/` | Cropped stat icon images (14 per labeled screenshot) produced from labeled screenshots + origin; not yet assigned a stat type. |
 
 ## Labeled data
 
