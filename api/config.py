@@ -64,6 +64,7 @@ class Config:
         get_nested(_config_data, "box_detector", "model_path", default="data/box_detector_model")
     )
     TRAINING_EPOCHS: int = max(1, int(get_nested(_config_data, "box_detector", "training_epochs", default=50)))
+    INITIAL_LEARNING_RATE: float = float(get_nested(_config_data, "box_detector", "initial_learning_rate", default=0.001))
     PREVIEW_EVERY_N_EPOCHS: int = max(
         1,
         min(int(get_nested(_config_data, "box_detector", "preview_every_n_epochs", default=20)), 1000),

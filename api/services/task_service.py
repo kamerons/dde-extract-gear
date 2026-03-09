@@ -97,6 +97,8 @@ class TaskService:
         self,
         model_type: str = "box_detector",
         resume_from_existing: bool = False,
+        training_epochs: Optional[int] = None,
+        initial_learning_rate: Optional[float] = None,
     ) -> str:
         """
         Create a new training task. Cancels any currently running training task.
@@ -133,6 +135,10 @@ class TaskService:
             "model_type": model_type,
             "resume_from_existing": resume_from_existing,
         }
+        if training_epochs is not None:
+            task_data["training_epochs"] = training_epochs
+        if initial_learning_rate is not None:
+            task_data["initial_learning_rate"] = initial_learning_rate
         self.redis_client.rpush(self.TRAINING_QUEUE_KEY, json.dumps(task_data))
 
         logger.info(f"Created training task {task_id}")

@@ -27,13 +27,20 @@ def check_docker():
         return False
 
 
-def get_compose_files():
-    """Get paths to docker-compose.yml and docker-compose.dev.yml for dev mode."""
+def get_compose_files(no_gpu=False):
+    """Get paths to docker-compose files for dev mode.
+    If no_gpu is True, include docker-compose.cpu.yml so the task service runs without GPU (12 GB RAM).
+    """
     script_dir = Path(__file__).parent
     docker_dir = script_dir / "docker"
     base = (docker_dir / "docker-compose.yml").absolute()
     dev = (docker_dir / "docker-compose.dev.yml").absolute()
-    return base, dev
+    files = [base, dev]
+    if no_gpu:
+        cpu_file = (docker_dir / "docker-compose.cpu.yml").absolute()
+        if cpu_file.exists():
+            files.append(cpu_file)
+    return files
 
 
 def get_project_root():
@@ -41,28 +48,32 @@ def get_project_root():
     return Path(__file__).parent
 
 
-def start_containers(build=False):
+def start_containers(build=False, no_gpu=False):
     """Start all Docker containers in dev mode (API hot-reload, source mounted).
 
     By default, images are only built if missing (fast restarts). Pass --build to
     force a rebuild after changing Dockerfiles or requirements.
+    Pass no_gpu=True to run the task container without GPU (12 GB RAM limit).
     """
     if not check_docker():
         print("✗ ERROR: Docker is not installed or not available in PATH")
         print("  Please install Docker and Docker Compose to continue.")
         sys.exit(1)
 
-    base_file, dev_file = get_compose_files()
-    if not base_file.exists():
-        print(f"✗ ERROR: docker-compose.yml not found at {base_file}")
-        sys.exit(1)
-    if not dev_file.exists():
-        print(f"✗ ERROR: docker-compose.dev.yml not found at {dev_file}")
+    compose_files = get_compose_files(no_gpu=no_gpu)
+    for f in compose_files[:2]:
+        if not f.exists():
+            print(f"✗ ERROR: compose file not found at {f}")
+            sys.exit(1)
+    if no_gpu and len(compose_files) == 3 and not compose_files[2].exists():
+        print(f"✗ ERROR: docker-compose.cpu.yml not found at {compose_files[2]}")
         sys.exit(1)
 
     print("Starting Docker containers (dev mode)...")
-    print(f"  Base: {base_file}")
-    print(f"  Dev:  {dev_file}")
+    for f in compose_files:
+        print(f"  {f}")
+    if no_gpu:
+        print("  Task: no GPU, 12 GB RAM limit")
     if build:
         print("  Build: forcing image rebuild")
     else:
@@ -77,16 +88,13 @@ def start_containers(build=False):
         project_root = get_project_root()
         os.chdir(project_root)
 
-        cmd = [
-            "docker", "compose",
-            "-f", str(base_file),
-            "-f", str(dev_file),
-            "up",
-        ]
+        cmd = ["docker", "compose"]
+        for f in compose_files:
+            cmd.extend(["-f", str(f)])
+        cmd.append("up")
         if build:
             cmd.append("--build")
 
-        # -f base -f dev: API gets --reload + source mount; foreground so logs are visible
         subprocess.run(
             cmd,
             check=True,
@@ -101,18 +109,16 @@ def start_containers(build=False):
 
 
 def stop_containers():
-    """Stop all Docker containers (must use same compose files as start)."""
+    """Stop all Docker containers. Uses base + dev compose files only (same project, so stack is torn down)."""
     if not check_docker():
         print("✗ ERROR: Docker is not installed or not available in PATH")
         sys.exit(1)
 
-    base_file, dev_file = get_compose_files()
-    if not base_file.exists():
-        print(f"✗ ERROR: docker-compose.yml not found at {base_file}")
-        sys.exit(1)
-    if not dev_file.exists():
-        print(f"✗ ERROR: docker-compose.dev.yml not found at {dev_file}")
-        sys.exit(1)
+    compose_files = get_compose_files(no_gpu=False)
+    for f in compose_files[:2]:
+        if not f.exists():
+            print(f"✗ ERROR: compose file not found at {f}")
+            sys.exit(1)
 
     print("Stopping Docker containers...")
 
@@ -120,13 +126,13 @@ def stop_containers():
         project_root = get_project_root()
         os.chdir(project_root)
 
+        cmd = ["docker", "compose"]
+        for f in compose_files:
+            cmd.extend(["-f", str(f)])
+        cmd.append("down")
+
         subprocess.run(
-            [
-                "docker", "compose",
-                "-f", str(base_file),
-                "-f", str(dev_file),
-                "down",
-            ],
+            cmd,
             check=True,
             text=True,
         )
@@ -143,19 +149,22 @@ def main():
     if len(sys.argv) < 2:
         print("Usage: python start.py [start|stop]")
         print("       python start.py start [--build]   # --build forces image rebuild")
+        print("       python start.py start --no-gpu   # task container: no GPU, 12 GB RAM")
         sys.exit(1)
 
     command = sys.argv[1].lower()
     build = "--build" in sys.argv
+    no_gpu = "--no-gpu" in sys.argv
 
     if command == "start":
-        start_containers(build=build)
+        start_containers(build=build, no_gpu=no_gpu)
     elif command == "stop":
         stop_containers()
     else:
         print(f"✗ ERROR: Unknown command '{command}'")
         print("Usage: python start.py [start|stop]")
         print("       python start.py start [--build]   # --build forces image rebuild")
+        print("       python start.py start --no-gpu   # task container: no GPU, 12 GB RAM")
         sys.exit(1)
 
 

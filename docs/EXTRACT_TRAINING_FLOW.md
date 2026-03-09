@@ -27,11 +27,10 @@ This document describes how box-detector training, model saving, and the trainin
 4. **API** returns `{ "task_id": "...", "status": "pending" }`.
 5. **Frontend** stores `task_id` and polls `GET /api/tasks/{task_id}` every 2s.
 
-6. **Worker** (`task/worker.py`) has one **long-running slot thread** that uses `brpop([TRAINING_QUEUE_NAME, QUEUE_NAME], timeout=...)` (so at most one training or one recommendation runs at a time) and an **evaluation worker pool** that consumes from `evaluation_tasks`. When the long-running slot pops a training task from `training_tasks`:
+6. **Worker** (`task/worker.py`) is an orchestrator: it uses `brpop([TRAINING_QUEUE_NAME, QUEUE_NAME], timeout=...)` (at most one training or one recommendation at a time). When it pops a training task from `training_tasks`:
    - Parses `task_data` -> `task_id`, `model_type`.
-   - Sets `TRAINING_CURRENT_TASK_KEY` to `task_id` (so API knows who is running).
-   - Updates `task:{task_id}:meta` to `status: "processing"`.
-   - Starts a **background eval thread** (see below), then calls `self.training_processor.process(...)`.
+   - Sets `TRAINING_CURRENT_TASK_KEY` to `task_id` and `task:{task_id}:meta` to `status: "processing"`.
+   - Runs **each unit of work in a subprocess** (`python -m task.run_task training '...'`). When the training subprocess returns "suspended" (preview-epoch with pending evaluation), the orchestrator drains `evaluation_tasks` (each evaluation in its own subprocess), then starts a new training subprocess with resume state. Subprocess exit releases GPU/process memory fully.
 
 ---
 
@@ -65,16 +64,14 @@ This document describes how box-detector training, model saving, and the trainin
    - Save **final model** to `save_dir`: timestamped `stem_YYYYMMDD_HHMMSS.keras` and legacy `stem.keras`. Logs paths and errors if files are missing after save.
    - Return `final_metrics` to the worker.
 
-5. **Worker** then:
-   - Clears `TRAINING_CURRENT_TASK_KEY`.
-   - Calls `update_task_status(task_id, "completed", results=results)` (writes to `task:{task_id}:meta` and `task:{task_id}:result`).
+5. **Training subprocess** (`task/run_task.py`) runs the processor and then clears `TRAINING_CURRENT_TASK_KEY` (or the orchestrator clears it) and calls `update_task_status(task_id, "completed", results=results)` (writes to `task:{task_id}:meta` and `task:{task_id}:result`).
 ---
 
 ## 4. Evaluation and preview at preview epochs
 
 - Evaluation (test-set metrics and preview) runs **only when a preview epoch is reached** (`epoch % preview_every_n_epochs == 0`), not on a timer.
-- The **training processor** (`BoxDetectorProcessor`) already has the model and test data each epoch. At preview epochs it calls `build_preview_items(...)` and invokes the worker's `preview_callback(epoch, metrics, preview_payload)`.
-- The **worker** passes `progress_callback` and `preview_callback` to `process()`. In `progress_callback`, when `epoch % PREVIEW_EVERY_N_EPOCHS == 0`, it writes `task:{task_id}:eval` = JSON of metrics (TTL 3600s). When `preview_callback` is invoked, the worker writes `task:{task_id}:latest_preview`, `extract:training:latest_preview`, and `task:{task_id}:preview_expected_duration_ms` to Redis.
+- The **training processor** (`BoxDetectorProcessor`) runs inside a **subprocess** (`task/run_task.py`). It has the model and test data each epoch. At preview epochs it calls `build_preview_items(...)` and invokes a `preview_callback(epoch, metrics, preview_payload)` that writes to Redis.
+- The **run_task** subprocess passes `progress_callback` and `preview_callback` to `process()`. In `progress_callback`, when `epoch % PREVIEW_EVERY_N_EPOCHS == 0`, it writes `task:{task_id}:eval` = JSON of metrics (TTL 3600s). When `preview_callback` is invoked, it writes `task:{task_id}:latest_preview`, `extract:training:latest_preview`, and `task:{task_id}:preview_expected_duration_ms` to Redis.
 - The checkpoint `_current.keras` is saved at preview epochs and on the last epoch (not every 10 epochs).
 
 ---
@@ -98,9 +95,9 @@ If the API and worker run in different containers and do not share the same `dat
 
 ## 6. Evaluation tasks and automatic preview
 
-**One-off evaluation tasks:** **`POST /api/extract/training/evaluate`** and **`POST /api/extract/training/preview`** create an evaluation task and return `{ task_id }`; the client polls `GET /api/tasks/{task_id}` for results and `model_format`. The task worker loads the model, runs evaluate or preview, and writes results to Redis.
+**One-off evaluation tasks:** **`POST /api/extract/training/evaluate`** and **`POST /api/extract/training/preview`** create an evaluation task and return `{ task_id }`; the client polls `GET /api/tasks/{task_id}` for results and `model_format`. The task container runs each evaluation in a **subprocess** (`task/run_task.py`), which loads the model, runs evaluate or preview, and writes results to Redis.
 
-**Automatic training preview:** During an active box detector training task, evaluation and preview run only at **preview epochs** (when `epoch % preview_every_n_epochs == 0`). The training processor builds metrics and preview at those epochs and the worker writes to Redis: `task:{task_id}:eval` (metrics), `task:{task_id}:latest_preview` and `extract:training:latest_preview` (items, scale_regular, scale_blueprint). When training completes, the worker runs preview once more for the final model and writes the same preview keys. The frontend polls **`GET /api/extract/training/preview/latest`** and displays the latest preview; no manual "Run preview" is required. Task status `GET /api/tasks/{task_id}` also includes `latest_preview` when present.
+**Automatic training preview:** During an active box detector training task, evaluation and preview run only at **preview epochs** (when `epoch % preview_every_n_epochs == 0`). The training subprocess builds metrics and preview at those epochs and writes to Redis: `task:{task_id}:eval` (metrics), `task:{task_id}:latest_preview` and `extract:training:latest_preview` (items, scale_regular, scale_blueprint). When training completes, the subprocess runs preview once more for the final model and writes the same preview keys. The frontend polls **`GET /api/extract/training/preview/latest`** and displays the latest preview; no manual "Run preview" is required. Task status `GET /api/tasks/{task_id}` also includes `latest_preview` when present.
 
 ---
 
@@ -138,10 +135,8 @@ Frontend                    API (extract)              Redis                    
    |                             |                       |    brpop training_tasks |                                |
    | GET /tasks/{id} (poll)       |                       |<-------------------------|                                |
    |----------------------------->|                       |                         | set CURRENT_TASK_KEY           |
-   |                             | hgetall task:meta      |                         | process_training_task()         |
-   |                             |<-----------------------|------------------------>|                                |
-   |                             |                       |                         | start eval thread              |
-   |                             |                       |                         | training_processor.process()  |
+   |                             | hgetall task:meta      |                         | spawn run_task training        |
+   |                             |<-----------------------|------------------------>| (subprocess) process()        |
    |                             |                       |                         |-------------------------------->|
    |                             |                       |                         |   per epoch: fit, save _current.keras
    |                             |                       |                         |   end: save timestamped + .keras
@@ -167,7 +162,7 @@ Frontend                    API (extract)              Redis                    
 |-----------------|--------|
 | Training start  | `api/routes/extract.py`, `api/services/task_service.py` |
 | Task status     | `api/routes/tasks.py`, `api/services/task_service.py` |
-| Worker loop     | `task/worker.py` (brpop, process_training_task, _eval_loop) |
+| Worker loop     | `task/worker.py` (brpop, spawn subprocesses); `task/run_task.py` (training/eval/recommendation) |
 | Training logic  | `task/processors/box_detector_processor.py` (process, save checkpoint + final) |
 | Model path      | `api/routes/extract.py` (_box_detector_load_path) |
 | Evaluate/Preview| `api/routes/extract.py` (training_evaluate, training_preview) |

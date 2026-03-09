@@ -1,6 +1,7 @@
 """Extract pipeline endpoints: screenshots, region boxes, and box detector training."""
 
 import io
+import json
 import logging
 from pathlib import Path
 
@@ -482,6 +483,36 @@ class TrainingStartRequest(BaseModel):
 
     model_type: str = "box_detector"
     resume_from_existing: bool = False
+    training_epochs: int | None = None
+    initial_learning_rate: float | None = None
+
+
+def _training_params_path() -> Path:
+    """Path to training_params.json (saved by task processor for resume defaults)."""
+    return _data_dir() / "models" / "box_detector" / "training_params.json"
+
+
+@router.get("/api/extract/training/params")
+async def training_params():
+    """
+    Return training_epochs and initial_learning_rate for the UI (resume defaults).
+    Reads from data/models/box_detector/training_params.json if present, else config defaults.
+    """
+    path = _training_params_path()
+    if path.exists():
+        try:
+            with open(path) as f:
+                data = json.load(f)
+            return {
+                "training_epochs": max(1, int(data.get("training_epochs", config.TRAINING_EPOCHS))),
+                "initial_learning_rate": float(data.get("initial_learning_rate", config.INITIAL_LEARNING_RATE)),
+            }
+        except (json.JSONDecodeError, OSError, TypeError, ValueError):
+            pass
+    return {
+        "training_epochs": config.TRAINING_EPOCHS,
+        "initial_learning_rate": config.INITIAL_LEARNING_RATE,
+    }
 
 
 @router.get("/api/extract/training/current")
@@ -500,15 +531,20 @@ async def training_start(body: TrainingStartRequest | None = None):
     """
     Start a box detector training task. Returns task_id to poll via GET /api/tasks/{task_id}.
     Body is optional; default model_type is box_detector.
+    Optional training_epochs and initial_learning_rate override config / saved params.
     """
     model_type = (body.model_type if body is not None else "box_detector") or "box_detector"
     if model_type != "box_detector":
         raise HTTPException(status_code=400, detail="Only model_type 'box_detector' is supported")
     resume_from_existing = body.resume_from_existing if body is not None else False
+    training_epochs = body.training_epochs if body is not None else None
+    initial_learning_rate = body.initial_learning_rate if body is not None else None
     try:
         task_id = task_service.create_training_task(
             model_type=model_type,
             resume_from_existing=resume_from_existing,
+            training_epochs=training_epochs,
+            initial_learning_rate=initial_learning_rate,
         )
     except Exception as e:
         logger.exception("Failed to create training task")

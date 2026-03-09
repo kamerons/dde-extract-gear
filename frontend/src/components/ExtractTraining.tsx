@@ -6,6 +6,7 @@ import {
   getTrainingTaskStatus,
   getExtractConfig,
   getTrainingDataCounts,
+  getTrainingParams,
   listModels,
   startModelEvaluationTask,
   type TrainingTaskStatus,
@@ -23,6 +24,8 @@ import { AccuracyStats } from './AccuracyStats';
 const TRAINING_POLL_INTERVAL_MS = 2000;
 const DEFAULT_PREVIEW_EVERY_N_EPOCHS = 20;
 const DEFAULT_PREVIEW_EXPECTED_DURATION_MS = 10000;
+const DEFAULT_TRAINING_EPOCHS = 50;
+const DEFAULT_INITIAL_LEARNING_RATE = 0.001;
 const EVAL_COUNTDOWN_SIZE = 56;
 const EVAL_COUNTDOWN_STROKE = 4;
 const EVAL_COUNTDOWN_R = (EVAL_COUNTDOWN_SIZE - EVAL_COUNTDOWN_STROKE) / 2;
@@ -88,6 +91,8 @@ export function ExtractTraining() {
   const [loadingModelResults, setLoadingModelResults] = useState(false);
   const [loadedModelError, setLoadedModelError] = useState<string | null>(null);
   const [modelEvaluationTaskId, setModelEvaluationTaskId] = useState<string | null>(null);
+  const [trainingEpochs, setTrainingEpochs] = useState(DEFAULT_TRAINING_EPOCHS);
+  const [initialLearningRate, setInitialLearningRate] = useState(DEFAULT_INITIAL_LEARNING_RATE);
   const modelEvaluationTaskIdRef = useRef<string | null>(null);
   const trainingPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const modelEvalPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -113,6 +118,17 @@ export function ExtractTraining() {
       loadTrainingDataCounts();
     }
   }, [modelSubTab, loadTrainingDataCounts]);
+
+  useEffect(() => {
+    if (modelSubTab === 'box_detector') {
+      getTrainingParams()
+        .then((p) => {
+          setTrainingEpochs(p.training_epochs);
+          setInitialLearningRate(p.initial_learning_rate);
+        })
+        .catch(() => {});
+    }
+  }, [modelSubTab]);
 
   const showLoadedModelMetrics =
     modelSubTab === 'box_detector' &&
@@ -249,14 +265,17 @@ export function ExtractTraining() {
     lastEpochWithPreviewRef.current = -1;
     taskPreviewExpectedDurationMsRef.current = null;
     try {
-      const { task_id } = await startTraining();
+      const { task_id } = await startTraining({
+        training_epochs: trainingEpochs,
+        initial_learning_rate: initialLearningRate,
+      });
       setTrainingTaskId(task_id);
       setTrainingStatus('pending');
       setTrainingProgress(null);
     } catch (e) {
       setTrainingError(e instanceof Error ? e.message : 'Failed to start training');
     }
-  }, []);
+  }, [trainingEpochs, initialLearningRate]);
 
   const handleStartTrainingResuming = useCallback(async () => {
     setTrainingError(null);
@@ -268,14 +287,17 @@ export function ExtractTraining() {
     lastEpochWithPreviewRef.current = -1;
     taskPreviewExpectedDurationMsRef.current = null;
     try {
-      const { task_id } = await startTrainingResumingFromExisting();
+      const { task_id } = await startTrainingResumingFromExisting({
+        training_epochs: trainingEpochs,
+        initial_learning_rate: initialLearningRate,
+      });
       setTrainingTaskId(task_id);
       setTrainingStatus('pending');
       setTrainingProgress(null);
     } catch (e) {
       setTrainingError(e instanceof Error ? e.message : 'Failed to start training');
     }
-  }, []);
+  }, [trainingEpochs, initialLearningRate]);
 
   const handleStopTraining = useCallback(async () => {
     setTrainingError(null);
@@ -476,6 +498,33 @@ export function ExtractTraining() {
                 ×{trainingDataCounts.augment_count} augmentation → up to{' '}
                 <strong>{trainingDataCounts.augmented_samples_per_epoch_max}</strong> augmented samples per epoch
               </p>
+            </div>
+          )}
+          {modelSubTab === 'box_detector' && (
+            <div className="extract-config-training-params">
+              <label className="extract-config-training-param-label">
+                Num epochs
+                <input
+                  type="number"
+                  min={1}
+                  max={100000}
+                  value={trainingEpochs}
+                  onChange={(e) => setTrainingEpochs(Number(e.target.value) || DEFAULT_TRAINING_EPOCHS)}
+                  className="extract-config-training-param-input"
+                />
+              </label>
+              <label className="extract-config-training-param-label">
+                Initial learning rate
+                <input
+                  type="number"
+                  min={1e-6}
+                  max={1}
+                  step="any"
+                  value={initialLearningRate}
+                  onChange={(e) => setInitialLearningRate(Number(e.target.value) || DEFAULT_INITIAL_LEARNING_RATE)}
+                  className="extract-config-training-param-input"
+                />
+              </label>
             </div>
           )}
           <div className="extract-config-training-actions">

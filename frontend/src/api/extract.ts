@@ -290,14 +290,40 @@ export async function startModelEvaluationTask(
   return response.json();
 }
 
+export interface TrainingParamsResponse {
+  training_epochs: number;
+  initial_learning_rate: number;
+}
+
+/**
+ * Fetch training params (epochs, learning rate) for resume defaults.
+ * Used to pre-populate the start/resume form; values come from saved file or server defaults.
+ */
+export async function getTrainingParams(): Promise<TrainingParamsResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/extract/training/params`);
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Failed to get training params: ${response.status} ${text}`);
+  }
+  return response.json();
+}
+
+export interface TrainingStartOptions {
+  training_epochs?: number;
+  initial_learning_rate?: number;
+}
+
 /**
  * Start a box detector training task. Poll with getTrainingTaskStatus(task_id).
  */
-export async function startTraining(): Promise<TrainingStartResponse> {
+export async function startTraining(options?: TrainingStartOptions): Promise<TrainingStartResponse> {
+  const body: Record<string, unknown> = { model_type: 'box_detector' };
+  if (options?.training_epochs != null) body.training_epochs = options.training_epochs;
+  if (options?.initial_learning_rate != null) body.initial_learning_rate = options.initial_learning_rate;
   const response = await fetch(`${API_BASE_URL}/api/extract/training/start`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model_type: 'box_detector' }),
+    body: JSON.stringify(body),
   });
   if (!response.ok) {
     const text = await response.text();
@@ -310,11 +336,19 @@ export async function startTraining(): Promise<TrainingStartResponse> {
  * Start a box detector training task using the existing saved model as the initial weights.
  * Poll with getTrainingTaskStatus(task_id). If no model exists, the backend builds a fresh one.
  */
-export async function startTrainingResumingFromExisting(): Promise<TrainingStartResponse> {
+export async function startTrainingResumingFromExisting(
+  options?: TrainingStartOptions
+): Promise<TrainingStartResponse> {
+  const body: Record<string, unknown> = {
+    model_type: 'box_detector',
+    resume_from_existing: true,
+  };
+  if (options?.training_epochs != null) body.training_epochs = options.training_epochs;
+  if (options?.initial_learning_rate != null) body.initial_learning_rate = options.initial_learning_rate;
   const response = await fetch(`${API_BASE_URL}/api/extract/training/start`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model_type: 'box_detector', resume_from_existing: true }),
+    body: JSON.stringify(body),
   });
   if (!response.ok) {
     const text = await response.text();

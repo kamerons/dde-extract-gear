@@ -1,7 +1,5 @@
 ---
-description: Markdown files must use only ASCII; use Unicode escapes for special characters
-globs: *.md
-alwaysApply: false
+alwaysApply: true
 ---
 # Markdown: ASCII only
 

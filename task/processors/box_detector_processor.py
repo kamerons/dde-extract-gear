@@ -5,6 +5,7 @@ to add new labels to the training set, augments in-process, and trains for a fix
 number of epochs. Supports progress callback and cancellation.
 """
 
+import json
 import logging
 import os
 import shutil
@@ -50,6 +51,22 @@ def _relax_path_for_host(path: Path, *, is_dir: bool = False) -> None:
         os.chmod(path, 0o777 if is_dir else 0o666)
     except OSError as e:
         logger.warning("Could not chmod %s: %s", path, e)
+
+
+def _write_training_params(save_dir: Path, training_epochs: int, initial_learning_rate: float) -> None:
+    """Write training_params.json for resume defaults (read by API and UI)."""
+    path = save_dir / "training_params.json"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w") as f:
+            json.dump(
+                {"training_epochs": training_epochs, "initial_learning_rate": initial_learning_rate},
+                f,
+                indent=2,
+            )
+        _relax_path_for_host(path, is_dir=False)
+    except OSError as e:
+        logger.warning("Could not write training_params.json to %s: %s", path, e)
 
 
 def _save_model_native(model, path: Path) -> None:
@@ -187,7 +204,7 @@ def _build_arrays(
     return np.stack(X_list), np.array(y_list, dtype=np.float32)
 
 
-def _build_model():
+def _build_model(initial_learning_rate: float = 0.001):
     """Keras regression model: CNN -> 2 outputs (origin x, y in input space)."""
     from tensorflow import keras
     model = keras.Sequential([
@@ -202,7 +219,11 @@ def _build_model():
         keras.layers.Dropout(0.3),
         keras.layers.Dense(2),
     ])
-    model.compile(optimizer="adam", loss="mse", metrics=["mae"])
+    model.compile(
+        optimizer=keras.optimizers.Adam(learning_rate=initial_learning_rate),
+        loss="mse",
+        metrics=["mae"],
+    )
     return model
 
 
@@ -305,6 +326,7 @@ class BoxDetectorProcessor:
         scale_regular: float = 1.0,
         scale_blueprint: float = 1.0,
         preview_every_n_epochs: int = 20,
+        initial_learning_rate: float = 0.001,
     ):
         self.data_dir = Path(data_dir) if not isinstance(data_dir, Path) else data_dir
         self.model_path = model_path
@@ -312,6 +334,7 @@ class BoxDetectorProcessor:
         self.test_blueprint_fraction = test_blueprint_fraction
         self.epochs = epochs
         self.preview_every_n_epochs = preview_every_n_epochs
+        self.initial_learning_rate = initial_learning_rate
         self.augment_shift_regular = augment_shift_regular
         self.augment_shift_blueprint = augment_shift_blueprint
         self.augment_fill = augment_fill
@@ -370,6 +393,7 @@ class BoxDetectorProcessor:
             stem = Path(stem).stem
         save_dir.mkdir(parents=True, exist_ok=True)
         _relax_path_for_host(save_dir, is_dir=True)
+        _write_training_params(save_dir, self.epochs, self.initial_learning_rate)
 
         start_epoch = 1
         if resume_from_epoch is not None and resume_from_epoch > 1:
@@ -395,12 +419,12 @@ class BoxDetectorProcessor:
                     model = _load_existing_model(load_path)
                 except Exception as e:
                     logger.warning("Failed to load existing model from %s: %s; building fresh model", load_path, e)
-                    model = _build_model()
+                    model = _build_model(self.initial_learning_rate)
             else:
                 logger.info("No existing model found; building fresh model")
-                model = _build_model()
+                model = _build_model(self.initial_learning_rate)
         else:
-            model = _build_model()
+            model = _build_model(self.initial_learning_rate)
 
         for epoch in range(start_epoch, self.epochs + 1):
             if check_cancelled and check_cancelled():
@@ -444,7 +468,7 @@ class BoxDetectorProcessor:
             hist = model.fit(
                 X_train, y_train,
                 epochs=1,
-                batch_size=4,
+                batch_size=32,
                 validation_data=validation_data,
                 verbose=0,
             )
@@ -518,6 +542,7 @@ class BoxDetectorProcessor:
                 current_path = save_dir / (stem + "_current.keras")
                 logger.info("Saving checkpoint to %s", current_path)
                 _save_model_native(model, current_path)
+                _write_training_params(save_dir, self.epochs, self.initial_learning_rate)
                 if not current_path.exists():
                     logger.warning("Checkpoint file missing after save: %s", current_path)
 

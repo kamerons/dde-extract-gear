@@ -1,0 +1,11 @@
+# Override for task service: no GPU, 12 GB RAM limit.
+# Use with: python start.py start --no-gpu
+# To use GPU again: python start.py stop then python start.py start
+
+services:
+  task:
+    deploy:
+      resources:
+        limits:
+          memory: 12G
+        # No reservations.devices (no GPU)

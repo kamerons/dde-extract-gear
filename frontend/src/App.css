@@ -1098,6 +1098,27 @@
   color: #555;
 }
 
+.extract-config-training-params {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem 1.5rem;
+  margin: 0.75rem 0;
+}
+
+.extract-config-training-param-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.9rem;
+  color: #333;
+}
+
+.extract-config-training-param-input {
+  width: 8rem;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.95rem;
+}
+
 .extract-config-sample-augments {
   margin: 1rem 0 0 0;
   padding: 0.75rem 0 0 0;

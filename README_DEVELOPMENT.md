@@ -113,6 +113,14 @@ The **task** service runs TensorFlow/Keras for training and inference. To use yo
 
 `docker/docker-compose.yml` already reserves one GPU for the task service (`deploy.resources.reservations.devices`). To use all GPUs, edit the task service and set `count: all` instead of `count: 1`.
 
+To run the **task** container **without GPU** (CPU only) with a **12 GB RAM** limit, use:
+
+```bash
+python start.py start --no-gpu
+```
+
+To use the GPU again, run `python start.py stop` then `python start.py start` (without `--no-gpu`).
+
 ### 3. Verify
 
 After bringing the stack up, check that the task container sees the GPU:
