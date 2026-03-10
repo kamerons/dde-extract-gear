@@ -16,6 +16,7 @@ import {
   type TrainingDataCountsResponse,
   type ModelOption,
   type ModelScope,
+  type IconTypeEvalResponse,
 } from '../api/extract';
 import { OriginScaleEditor } from './OriginScaleEditor';
 import { TrainingPreview } from './TrainingPreview';
@@ -69,8 +70,16 @@ function EvalCountdownCircle({ progress }: { progress: number }) {
 type ModelSubTab = 'box_detector' | 'type' | 'digit';
 type TypeFlowMode = 'label' | 'verify';
 
-function evalResponseKey(e: EvaluateResponse): string {
-  return `${e.test_mae_x}-${e.test_mae_y}-${e.accuracy_within_5px}`;
+function evalResponseKey(e: EvaluateResponse | IconTypeEvalResponse): string {
+  if (typeof (e as IconTypeEvalResponse).val_accuracy === 'number') {
+    return `acc-${(e as IconTypeEvalResponse).val_accuracy}`;
+  }
+  const b = e as EvaluateResponse;
+  return `${b.test_mae_x}-${b.test_mae_y}-${b.accuracy_within_5px}`;
+}
+
+function isBoxDetectorEval(e: EvaluateResponse | IconTypeEvalResponse): e is EvaluateResponse {
+  return typeof (e as EvaluateResponse).accuracy_within_5px === 'number';
 }
 
 export function ExtractTraining() {
@@ -79,6 +88,7 @@ export function ExtractTraining() {
   const [extractConfig, setExtractConfig] = useState<ExtractConfigResponse | null>(null);
   const [trainingTaskId, setTrainingTaskId] = useState<string | null>(null);
   const [trainingStatus, setTrainingStatus] = useState<TrainingTaskStatus['status'] | null>(null);
+  const [currentTrainingModelType, setCurrentTrainingModelType] = useState<'box_detector' | 'icon_type' | null>(null);
   const [trainingProgress, setTrainingProgress] = useState<{ evaluated: number; total_planned: number } | null>(null);
   const [trainingResults, setTrainingResults] = useState<Record<string, number | string> | null>(null);
   const [trainingError, setTrainingError] = useState<string | null>(null);
@@ -268,8 +278,10 @@ export function ExtractTraining() {
     prevEvalKeyRef.current = null;
     lastEpochWithPreviewRef.current = -1;
     taskPreviewExpectedDurationMsRef.current = null;
+    const model_type = modelSubTab === 'type' ? 'icon_type' : 'box_detector';
     try {
       const { task_id } = await startTraining({
+        model_type,
         training_epochs: trainingEpochs,
         initial_learning_rate: initialLearningRate,
       });
@@ -279,7 +291,7 @@ export function ExtractTraining() {
     } catch (e) {
       setTrainingError(e instanceof Error ? e.message : 'Failed to start training');
     }
-  }, [trainingEpochs, initialLearningRate]);
+  }, [modelSubTab, trainingEpochs, initialLearningRate]);
 
   const handleStartTrainingResuming = useCallback(async () => {
     setTrainingError(null);
@@ -290,8 +302,10 @@ export function ExtractTraining() {
     prevEvalKeyRef.current = null;
     lastEpochWithPreviewRef.current = -1;
     taskPreviewExpectedDurationMsRef.current = null;
+    const model_type = modelSubTab === 'type' ? 'icon_type' : 'box_detector';
     try {
       const { task_id } = await startTrainingResumingFromExisting({
+        model_type,
         training_epochs: trainingEpochs,
         initial_learning_rate: initialLearningRate,
       });
@@ -301,7 +315,7 @@ export function ExtractTraining() {
     } catch (e) {
       setTrainingError(e instanceof Error ? e.message : 'Failed to start training');
     }
-  }, [trainingEpochs, initialLearningRate]);
+  }, [modelSubTab, trainingEpochs, initialLearningRate]);
 
   const handleStopTraining = useCallback(async () => {
     setTrainingError(null);
@@ -321,6 +335,9 @@ export function ExtractTraining() {
       try {
         const res = await getTrainingTaskStatus(taskId);
         setTrainingStatus(res.status);
+        if (res.model_type === 'box_detector' || res.model_type === 'icon_type') {
+          setCurrentTrainingModelType(res.model_type);
+        }
         if (res.progress) setTrainingProgress(res.progress);
         if (res.results) setTrainingResults(res.results as Record<string, number | string>);
         if (res.latest_eval != null) {
@@ -363,6 +380,9 @@ export function ExtractTraining() {
         if (res.status === 'completed' || res.status === 'failed' || res.status === 'cancelled' || res.status === 'not_found') {
           setTrainingTaskId(null);
           lastEpochWithEvalRequestedRef.current = -1;
+          if (res.model_type !== 'box_detector' && res.model_type !== 'icon_type') {
+            setCurrentTrainingModelType(null);
+          }
         }
       } catch {
         // keep polling
@@ -620,7 +640,12 @@ export function ExtractTraining() {
                   Train: {Number(trainingResults.train_samples)}, Test: {Number(trainingResults.test_samples)} samples
                 </p>
               )}
-              {(typeof trainingResults.test_mae_x === 'number' || typeof trainingResults.test_mae_y === 'number') && (
+              {(currentTrainingModelType === 'icon_type' || (currentTrainingModelType == null && typeof trainingResults.val_accuracy === 'number')) && typeof trainingResults.val_accuracy === 'number' && (
+                <p className="extract-config-training-samples" role="status">
+                  Test accuracy: {(Number(trainingResults.val_accuracy) * 100).toFixed(2)}%
+                </p>
+              )}
+              {(currentTrainingModelType === 'box_detector' || (currentTrainingModelType == null && typeof (trainingResults as Record<string, unknown>).accuracy_within_5px === 'number')) && (typeof trainingResults.test_mae_x === 'number' || typeof trainingResults.test_mae_y === 'number') && (
                 <ul>
                   {typeof trainingResults.test_mae_x === 'number' && (
                     <li>Test MAE X: {trainingResults.test_mae_x.toFixed(4)}</li>
@@ -630,7 +655,7 @@ export function ExtractTraining() {
                   )}
                 </ul>
               )}
-              {(typeof trainingResults.accuracy_within_15px === 'number' || typeof trainingResults.accuracy_within_5px === 'number' || typeof trainingResults.accuracy_within_3px === 'number') && (
+              {(currentTrainingModelType === 'box_detector' || (currentTrainingModelType == null && (typeof trainingResults.accuracy_within_15px === 'number' || typeof trainingResults.accuracy_within_5px === 'number' || typeof trainingResults.accuracy_within_3px === 'number'))) && (typeof trainingResults.accuracy_within_15px === 'number' || typeof trainingResults.accuracy_within_5px === 'number' || typeof trainingResults.accuracy_within_3px === 'number') && (
                 <AccuracyStats
                   accuracyWithin15Px={Number(trainingResults.accuracy_within_15px ?? 0)}
                   accuracyWithin5Px={Number(trainingResults.accuracy_within_5px ?? 0)}
@@ -706,11 +731,17 @@ export function ExtractTraining() {
                 <p className="stat-section-label">Test set</p>
                 <EvalCountdownCircle progress={circleProgress} />
               </div>
-              <AccuracyStats
-                accuracyWithin15Px={latestEval.accuracy_within_15px}
-                accuracyWithin5Px={latestEval.accuracy_within_5px}
-                accuracyWithin3Px={latestEval.accuracy_within_3px}
-              />
+              {isBoxDetectorEval(latestEval) ? (
+                <AccuracyStats
+                  accuracyWithin15Px={latestEval.accuracy_within_15px}
+                  accuracyWithin5Px={latestEval.accuracy_within_5px}
+                  accuracyWithin3Px={latestEval.accuracy_within_3px}
+                />
+              ) : typeof (latestEval as IconTypeEvalResponse).val_accuracy === 'number' ? (
+                <p className="extract-config-training-samples">
+                  Test accuracy: {((latestEval as IconTypeEvalResponse).val_accuracy! * 100).toFixed(2)}%
+                </p>
+              ) : null}
             </div>
           )}
           {modelSubTab === 'box_detector' && !showLoadedModelMetrics && (

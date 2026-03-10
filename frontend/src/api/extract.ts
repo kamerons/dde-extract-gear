@@ -303,10 +303,12 @@ export interface TrainingTaskStatus {
   task_id: string;
   status: 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled' | 'not_found';
   task_type?: string;
+  /** Set for training tasks: 'box_detector' | 'icon_type'. */
+  model_type?: 'box_detector' | 'icon_type';
   progress?: { evaluated: number; total_planned: number };
-  /** Includes train_samples, test_samples when present (box detector training). */
+  /** Includes train_samples, test_samples when present; box detector has accuracy_within_*px, icon_type has val_accuracy/accuracy. */
   results?: Record<string, unknown> & { train_samples?: number; test_samples?: number };
-  latest_eval?: EvaluateResponse;
+  latest_eval?: EvaluateResponse | IconTypeEvalResponse;
   latest_preview?: TrainingPreviewResponse;
   /** Expected duration in ms for next preview (test set size * ms per image). */
   preview_expected_duration_ms?: number;
@@ -314,12 +316,21 @@ export interface TrainingTaskStatus {
   model_format?: string;
 }
 
+/** Box detector eval: pixel MAE and accuracy within N px. */
 export interface EvaluateResponse {
   test_mae_x: number;
   test_mae_y: number;
   accuracy_within_15px: number;
   accuracy_within_5px: number;
   accuracy_within_3px: number;
+}
+
+/** Icon type (classification) eval: fraction correct. */
+export interface IconTypeEvalResponse {
+  val_accuracy?: number;
+  accuracy?: number;
+  train_samples?: number;
+  test_samples?: number;
 }
 
 export interface ModelOption {
@@ -382,15 +393,17 @@ export async function getTrainingParams(): Promise<TrainingParamsResponse> {
 }
 
 export interface TrainingStartOptions {
+  /** Which model to train: box_detector (screenshots) or icon_type (stat icon classification). */
+  model_type?: 'box_detector' | 'icon_type';
   training_epochs?: number;
   initial_learning_rate?: number;
 }
 
 /**
- * Start a box detector training task. Poll with getTrainingTaskStatus(task_id).
+ * Start a training task (box detector or icon type). Poll with getTrainingTaskStatus(task_id).
  */
 export async function startTraining(options?: TrainingStartOptions): Promise<TrainingStartResponse> {
-  const body: Record<string, unknown> = { model_type: 'box_detector' };
+  const body: Record<string, unknown> = { model_type: options?.model_type ?? 'box_detector' };
   if (options?.training_epochs != null) body.training_epochs = options.training_epochs;
   if (options?.initial_learning_rate != null) body.initial_learning_rate = options.initial_learning_rate;
   const response = await fetch(`${API_BASE_URL}/api/extract/training/start`, {
@@ -406,14 +419,14 @@ export async function startTraining(options?: TrainingStartOptions): Promise<Tra
 }
 
 /**
- * Start a box detector training task using the existing saved model as the initial weights.
- * Poll with getTrainingTaskStatus(task_id). If no model exists, the backend builds a fresh one.
+ * Start a training task using the existing saved model as initial weights (box_detector only; icon_type builds fresh).
+ * Poll with getTrainingTaskStatus(task_id).
  */
 export async function startTrainingResumingFromExisting(
   options?: TrainingStartOptions
 ): Promise<TrainingStartResponse> {
   const body: Record<string, unknown> = {
-    model_type: 'box_detector',
+    model_type: options?.model_type ?? 'box_detector',
     resume_from_existing: true,
   };
   if (options?.training_epochs != null) body.training_epochs = options.training_epochs;

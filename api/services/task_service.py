@@ -234,6 +234,8 @@ class TaskService:
         }
         if meta.get("task_type"):
             response["task_type"] = meta.get("task_type")
+        if meta.get("model_type"):
+            response["model_type"] = meta.get("model_type")
 
         # Progress (while processing or completed)
         evaluated_str = meta.get("evaluated")

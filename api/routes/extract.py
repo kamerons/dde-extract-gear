@@ -674,13 +674,16 @@ async def training_current():
 @router.post("/api/extract/training/start")
 async def training_start(body: TrainingStartRequest | None = None):
     """
-    Start a box detector training task. Returns task_id to poll via GET /api/tasks/{task_id}.
+    Start a training task (box_detector or icon_type). Returns task_id to poll via GET /api/tasks/{task_id}.
     Body is optional; default model_type is box_detector.
     Optional training_epochs and initial_learning_rate override config / saved params.
     """
     model_type = (body.model_type if body is not None else "box_detector") or "box_detector"
-    if model_type != "box_detector":
-        raise HTTPException(status_code=400, detail="Only model_type 'box_detector' is supported")
+    if model_type not in ("box_detector", "icon_type"):
+        raise HTTPException(
+            status_code=400,
+            detail="model_type must be 'box_detector' or 'icon_type'",
+        )
     resume_from_existing = body.resume_from_existing if body is not None else False
     training_epochs = body.training_epochs if body is not None else None
     initial_learning_rate = body.initial_learning_rate if body is not None else None

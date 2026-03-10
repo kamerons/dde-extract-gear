@@ -17,6 +17,7 @@ import redis
 from task.config import Config
 from task.redis_updates import update_task_progress, update_task_status
 from task.processors.box_detector_processor import BoxDetectorProcessor
+from task.processors.icon_type_detector_processor import IconTypeDetectorProcessor
 from task.processors.recommendation_processor import RecommendationProcessor
 from task.processors.evaluation_processor import (
     run_evaluate as eval_run_evaluate,
@@ -64,6 +65,46 @@ def _run_training(
         initial_learning_rate = float(initial_learning_rate)
     else:
         initial_learning_rate = config.INITIAL_LEARNING_RATE
+
+    if model_type == "icon_type":
+        training_epochs_icon = task_data.get("training_epochs")
+        if training_epochs_icon is not None:
+            training_epochs_icon = max(1, int(training_epochs_icon))
+        else:
+            training_epochs_icon = config.ICON_TYPE_DETECTION_TRAINING_EPOCHS
+        initial_lr_icon = task_data.get("initial_learning_rate")
+        if initial_lr_icon is not None:
+            initial_lr_icon = float(initial_lr_icon)
+        else:
+            initial_lr_icon = config.ICON_TYPE_DETECTION_INITIAL_LEARNING_RATE
+        icon_processor = IconTypeDetectorProcessor(
+            data_dir=config.DATA_DIR,
+            model_path=config.ICON_TYPE_DETECTION_MODEL_PATH,
+            test_ratio=config.ICON_TYPE_DETECTION_TEST_RATIO,
+            epochs=training_epochs_icon,
+            initial_learning_rate=initial_lr_icon,
+        )
+
+        def progress_callback_icon(epoch: int, total_epochs: int, metrics: Dict) -> None:
+            update_task_progress(
+                redis_client, task_id, evaluated=epoch, total_planned=total_epochs, partial_results=metrics
+            )
+            redis_client.setex(f"task:{task_id}:eval", 3600, json.dumps(metrics))
+
+        def check_cancelled_icon() -> bool:
+            return redis_client.get(f"task:{task_id}:cancelled") == "1"
+
+        try:
+            results = icon_processor.process(
+                task_id=task_id,
+                progress_callback=progress_callback_icon,
+                check_cancelled=check_cancelled_icon,
+            )
+            return results
+        except TaskCancelledError:
+            raise
+        except Exception as e:
+            return {"error": "training_failed", "message": str(e)}
 
     if model_type != "box_detector":
         return {"error": "unknown_model", "message": f"Unknown model_type: {model_type}"}
@@ -136,8 +177,9 @@ def _finish_training_completed(
     repo_root: Path,
     task_id: str,
     results: Dict[str, Any],
+    model_type: str = "box_detector",
 ) -> None:
-    """Write final preview and completed status to Redis (same logic as worker)."""
+    """Write final preview (box_detector only) and completed status to Redis."""
     final_preview = results.get("final_preview")
     if final_preview and isinstance(final_preview, dict) and "items" in final_preview:
         preview_json = json.dumps(final_preview)
@@ -147,7 +189,7 @@ def _finish_training_completed(
             "Completion preview from processor (%d items), skipped eval_run_preview",
             len(final_preview.get("items", [])),
         )
-    else:
+    elif model_type == "box_detector":
         data_dir = repo_root / config.DATA_DIR
         logger.info("Running completion preview (data_dir=%s)", data_dir)
         t0 = time.perf_counter()
@@ -209,7 +251,8 @@ def run_training(redis_client: redis.Redis, config: Config, task_data: Dict[str,
         )
         return results
     repo_root = Path(__file__).resolve().parent.parent
-    _finish_training_completed(redis_client, config, repo_root, task_id, results)
+    model_type = task_data.get("model_type", "box_detector")
+    _finish_training_completed(redis_client, config, repo_root, task_id, results, model_type=model_type)
     return {k: v for k, v in results.items() if k != "final_preview"}
 
 
