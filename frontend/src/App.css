@@ -1460,6 +1460,137 @@
   padding: 1rem 0;
 }
 
+/* Stat icon labeler (type detection) */
+.extract-config-stat-icon-labeler {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.extract-config-stat-icon-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  font-size: 0.9rem;
+  color: #555;
+  margin: 0;
+}
+
+.extract-config-stat-icon-progress {
+  font-size: 0.95rem;
+  margin: 0;
+  color: #333;
+}
+
+.extract-config-stat-icon-nav {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.extract-config-stat-icon-nav-btn {
+  padding: 0.4rem 0.75rem;
+  font-size: 0.9rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  background: #f5f5f5;
+  cursor: pointer;
+}
+
+.extract-config-stat-icon-nav-btn:hover:not(:disabled) {
+  background: #e8e8e8;
+}
+
+.extract-config-stat-icon-nav-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.extract-config-stat-icon-nav-index {
+  font-size: 0.9rem;
+  color: #666;
+}
+
+.extract-config-stat-icon-image-wrap {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  padding: 0.5rem;
+  background: #fafafa;
+}
+
+.extract-config-stat-icon-badge {
+  margin: 0.5rem 0 0 0;
+  padding: 0.2rem 0.4rem;
+  font-size: 0.75rem;
+  background: #e0e8f0;
+  color: #333;
+  border-radius: 4px;
+}
+
+.extract-config-stat-icon-image {
+  display: block;
+  vertical-align: top;
+  image-rendering: pixelated;
+  image-rendering: -moz-crisp-edges;
+  image-rendering: crisp-edges;
+}
+
+.extract-config-stat-icon-saving {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #666;
+}
+
+.extract-config-stat-icon-error {
+  color: #c00;
+  margin: 0 0 0.5rem 0;
+}
+
+.extract-config-stat-icon-button-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.extract-config-stat-icon-button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.extract-config-stat-icon-btn {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  padding: 0.4rem 0.65rem;
+  font-size: 0.9rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  background: #f5f5f5;
+  cursor: pointer;
+}
+
+.extract-config-stat-icon-btn:hover:not(:disabled) {
+  background: #e8e8e8;
+}
+
+.extract-config-stat-icon-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.extract-config-stat-icon-btn-label {
+  font-weight: 500;
+}
+
+.extract-config-stat-icon-btn-hotkey {
+  font-size: 0.8rem;
+  color: #666;
+}
+
 /* Training preview (test set with boxes) */
 .extract-config-training-preview {
   margin-top: 0.5rem;

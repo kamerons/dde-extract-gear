@@ -19,6 +19,7 @@ import {
 } from '../api/extract';
 import { OriginScaleEditor } from './OriginScaleEditor';
 import { TrainingPreview } from './TrainingPreview';
+import { StatIconLabeler } from './StatIconLabeler';
 import { AccuracyStats } from './AccuracyStats';
 
 const TRAINING_POLL_INTERVAL_MS = 2000;
@@ -71,7 +72,7 @@ function evalResponseKey(e: EvaluateResponse): string {
 }
 
 export function ExtractTraining() {
-  const [modelSubTab, setModelSubTab] = useState<ModelSubTab>('box_detector');
+  const [modelSubTab, setModelSubTab] = useState<ModelSubTab>('type');
   const [extractConfig, setExtractConfig] = useState<ExtractConfigResponse | null>(null);
   const [trainingTaskId, setTrainingTaskId] = useState<string | null>(null);
   const [trainingStatus, setTrainingStatus] = useState<TrainingTaskStatus['status'] | null>(null);
@@ -482,7 +483,8 @@ export function ExtractTraining() {
               showCroppedAreaOption={true}
             />
           )}
-          {(modelSubTab === 'digit' || modelSubTab === 'type') && (
+          {modelSubTab === 'type' && <StatIconLabeler />}
+          {modelSubTab === 'digit' && (
             <p className="extract-config-coming-soon">Coming soon.</p>
           )}
         </div>

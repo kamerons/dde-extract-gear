@@ -179,6 +179,79 @@ export function getScreenshotUrl(
   return `${API_BASE_URL}/api/extract/screenshots/${encodeURIComponent(filename)}?${params}`;
 }
 
+// --- Stat icon labeling (type detection) ---
+
+/**
+ * List unlabeled stat icon filenames (PNGs in data/unlabeled/stat_icons).
+ */
+export async function listUnlabeledStatIcons(): Promise<{ filenames: string[] }> {
+  const response = await fetch(`${API_BASE_URL}/api/extract/stat-icons/unlabeled`);
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Failed to list unlabeled stat icons: ${response.status} ${text}`);
+  }
+  return response.json();
+}
+
+export interface StatIconItem {
+  filename: string;
+  stat_type: string | null;
+}
+
+/**
+ * List all stat icons (unlabeled and labeled) with current label.
+ * Use for navigation and re-labeling; frontend keeps full list and can correct labels.
+ */
+export async function listAllStatIcons(): Promise<{ items: StatIconItem[] }> {
+  const response = await fetch(`${API_BASE_URL}/api/extract/stat-icons/list`);
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Failed to list stat icons: ${response.status} ${text}`);
+  }
+  return response.json();
+}
+
+/**
+ * Return the URL for a stat icon image (served from unlabeled or labeled dir).
+ */
+export function getStatIconUrl(filename: string): string {
+  return `${API_BASE_URL}/api/extract/stat-icons/${encodeURIComponent(filename)}`;
+}
+
+/**
+ * Save stat icon label: move file to labeled/icons/<statType>/ (new label or re-label).
+ */
+export async function saveStatIconLabel(filename: string, statType: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/api/extract/stat-icons/save-label`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ filename, stat_type: statType }),
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    let message = text;
+    try {
+      const body = JSON.parse(text) as { detail?: string };
+      if (typeof body.detail === 'string') message = body.detail;
+    } catch {
+      message = `Failed to save stat icon label: ${response.status} ${text}`;
+    }
+    throw new Error(message);
+  }
+}
+
+/**
+ * Fetch stat types for the UI (STAT_GROUPS keys + "none").
+ */
+export async function getStatTypes(): Promise<{ stat_types: string[] }> {
+  const response = await fetch(`${API_BASE_URL}/api/extract/stat-types`);
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Failed to fetch stat types: ${response.status} ${text}`);
+  }
+  return response.json();
+}
+
 /**
  * Compute region boxes for the first card given origin, scale, and image type.
  * Returns boxes in full-resolution coordinates; scale to 50% in the UI for display.

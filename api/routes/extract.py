@@ -14,6 +14,7 @@ from api.config import Config
 from api.services.task_service import TaskService
 from shared.box_detector_augment import compute_translation_margin_lines, crop_to_inner_rect
 from shared.extract_regions import compute_boxes
+from shared.stat_normalizer import StatNormalizer
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,9 @@ LABELED_SCREENSHOT_SUBDIRS_WRITABLE = (
     "labeled/screenshots/regular",
     "labeled/screenshots/blueprint",
 )
+
+# Valid stat types for stat icon labeling (STAT_GROUPS keys + "none")
+VALID_STAT_TYPES = frozenset(list(StatNormalizer.STAT_GROUPS.keys()) + ["none"])
 
 
 def _repo_root() -> Path:
@@ -424,6 +428,147 @@ async def serve_screenshot(
         body = _serve_cropped_image(path, subdir)
         return Response(content=body, media_type="image/png")
     return FileResponse(path, media_type="image/png")
+
+
+def _stat_icons_unlabeled_dir() -> Path:
+    """Return path to data/unlabeled/stat_icons."""
+    return (_data_dir() / "unlabeled" / "stat_icons").resolve()
+
+
+def _stat_icons_labeled_base() -> Path:
+    """Return path to data/labeled/icons."""
+    return (_data_dir() / "labeled" / "icons").resolve()
+
+
+def _stat_icon_filename_safe(filename: str) -> None:
+    """Raise if filename is invalid (path traversal)."""
+    if "/" in filename or "\\" in filename or not filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    if Path(filename).suffix.lower() not in (".png", ".jpg", ".jpeg"):
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+
+def _find_stat_icon_path(filename: str) -> tuple[Path, str | None]:
+    """
+    Find stat icon file by filename. Look in unlabeled first, then in each labeled/icons/<type>/.
+    Returns (absolute_path, current_stat_type_or_None).
+    Raises HTTPException if not found.
+    """
+    _stat_icon_filename_safe(filename)
+    unlabeled_dir = _stat_icons_unlabeled_dir()
+    unlabeled_path = (unlabeled_dir / filename).resolve()
+    try:
+        unlabeled_path.relative_to(unlabeled_dir)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    if unlabeled_path.exists() and unlabeled_path.is_file():
+        return (unlabeled_path, None)
+    labeled_base = _stat_icons_labeled_base()
+    if labeled_base.exists():
+        for subdir in labeled_base.iterdir():
+            if subdir.is_dir() and subdir.name in VALID_STAT_TYPES:
+                path = (subdir / filename).resolve()
+                try:
+                    path.relative_to(subdir)
+                except ValueError:
+                    continue
+                if path.exists() and path.is_file():
+                    return (path, subdir.name)
+    raise HTTPException(status_code=404, detail="Stat icon not found")
+
+
+@router.get("/api/extract/stat-types")
+async def get_stat_types():
+    """Return stat type keys for the UI (STAT_GROUPS + none)."""
+    return {"stat_types": list(StatNormalizer.STAT_GROUPS.keys()) + ["none"]}
+
+
+def _list_all_stat_icon_items() -> list[dict]:
+    """Build list of all stat icon items: { filename, stat_type } (stat_type null if unlabeled)."""
+    seen: set[str] = set()
+    items: list[dict] = []
+    unlabeled_dir = _stat_icons_unlabeled_dir()
+    if unlabeled_dir.exists():
+        for p in sorted(unlabeled_dir.iterdir()):
+            if p.suffix.lower() == ".png" and p.is_file():
+                name = p.name
+                if name not in seen:
+                    seen.add(name)
+                    items.append({"filename": name, "stat_type": None})
+    labeled_base = _stat_icons_labeled_base()
+    if labeled_base.exists():
+        for subdir in sorted(labeled_base.iterdir()):
+            if subdir.is_dir() and subdir.name in VALID_STAT_TYPES:
+                for p in sorted(subdir.iterdir()):
+                    if p.suffix.lower() in (".png", ".jpg", ".jpeg") and p.is_file():
+                        name = p.name
+                        if name not in seen:
+                            seen.add(name)
+                            items.append({"filename": name, "stat_type": subdir.name})
+    items.sort(key=lambda x: x["filename"])
+    return items
+
+
+@router.get("/api/extract/stat-icons/unlabeled")
+async def list_unlabeled_stat_icons():
+    """List PNG filenames in data/unlabeled/stat_icons (kept for backwards compatibility)."""
+    items = _list_all_stat_icon_items()
+    filenames = [x["filename"] for x in items if x["stat_type"] is None]
+    return {"filenames": filenames}
+
+
+@router.get("/api/extract/stat-icons/list")
+async def list_all_stat_icons():
+    """List all stat icons (unlabeled and labeled) with current label. For navigation and re-labeling."""
+    return {"items": _list_all_stat_icon_items()}
+
+
+@router.get("/api/extract/stat-icons/{filename}")
+async def serve_stat_icon(filename: str):
+    """Serve a stat icon image from unlabeled/stat_icons or labeled/icons/<type>/."""
+    path, _ = _find_stat_icon_path(filename)
+    return FileResponse(path, media_type="image/png")
+
+
+class SaveStatIconLabelRequest(BaseModel):
+    """Request body for POST /api/extract/stat-icons/save-label."""
+
+    filename: str
+    stat_type: str
+
+
+@router.post("/api/extract/stat-icons/save-label")
+async def save_stat_icon_label(body: SaveStatIconLabelRequest):
+    """
+    Set stat icon label: move from unlabeled to labeled, or move between labeled dirs (re-label).
+    File is found in unlabeled/stat_icons or labeled/icons/<any_type>/.
+    """
+    if body.stat_type not in VALID_STAT_TYPES:
+        raise HTTPException(status_code=400, detail=f"Invalid stat_type; must be one of {sorted(VALID_STAT_TYPES)}")
+    try:
+        src, current_type = _find_stat_icon_path(body.filename)
+    except HTTPException:
+        raise
+    dest_dir = (_data_dir() / "labeled" / "icons" / body.stat_type).resolve()
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = (dest_dir / body.filename).resolve()
+    try:
+        dest.relative_to(dest_dir)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    if src == dest:
+        return {"ok": True}
+    try:
+        src.rename(dest)
+    except OSError as e:
+        logger.exception("Failed to move stat icon")
+        if getattr(e, "errno", None) == 30:
+            raise HTTPException(
+                status_code=503,
+                detail="The data directory is read-only. Mount the data volume with write access.",
+            ) from e
+        raise HTTPException(status_code=500, detail="Failed to save label") from e
+    return {"ok": True}
 
 
 @router.post("/api/extract/boxes")

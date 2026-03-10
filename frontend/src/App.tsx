@@ -10,7 +10,7 @@ type Tab = 'recommendations' | 'training';
 
 function App() {
   const [currentView, setCurrentView] = useState<View>('configuration');
-  const [activeTab, setActiveTab] = useState<Tab>('recommendations');
+  const [activeTab, setActiveTab] = useState<Tab>('training');
   const [pendingPreferences, setPendingPreferences] = useState<BuildPreferences | null>(null);
   const [configError, setConfigError] = useState<string | null>(null);
 
