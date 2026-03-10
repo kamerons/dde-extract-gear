@@ -20,6 +20,7 @@ import {
 import { OriginScaleEditor } from './OriginScaleEditor';
 import { TrainingPreview } from './TrainingPreview';
 import { StatIconLabeler } from './StatIconLabeler';
+import { StatIconVerifier } from './StatIconVerifier';
 import { AccuracyStats } from './AccuracyStats';
 
 const TRAINING_POLL_INTERVAL_MS = 2000;
@@ -66,6 +67,7 @@ function EvalCountdownCircle({ progress }: { progress: number }) {
 }
 
 type ModelSubTab = 'box_detector' | 'type' | 'digit';
+type TypeFlowMode = 'label' | 'verify';
 
 function evalResponseKey(e: EvaluateResponse): string {
   return `${e.test_mae_x}-${e.test_mae_y}-${e.accuracy_within_5px}`;
@@ -73,6 +75,7 @@ function evalResponseKey(e: EvaluateResponse): string {
 
 export function ExtractTraining() {
   const [modelSubTab, setModelSubTab] = useState<ModelSubTab>('type');
+  const [typeFlowMode, setTypeFlowMode] = useState<TypeFlowMode>('label');
   const [extractConfig, setExtractConfig] = useState<ExtractConfigResponse | null>(null);
   const [trainingTaskId, setTrainingTaskId] = useState<string | null>(null);
   const [trainingStatus, setTrainingStatus] = useState<TrainingTaskStatus['status'] | null>(null);
@@ -483,7 +486,37 @@ export function ExtractTraining() {
               showCroppedAreaOption={true}
             />
           )}
-          {modelSubTab === 'type' && <StatIconLabeler />}
+          {modelSubTab === 'type' && (
+            <>
+              <nav
+                className="extract-config-stat-icon-flow-tabs"
+                aria-label="Label or verify stat types"
+              >
+                <button
+                  type="button"
+                  className={`extract-config-stat-icon-flow-tab ${
+                    typeFlowMode === 'label' ? 'extract-config-stat-icon-flow-tab-active' : ''
+                  }`}
+                  onClick={() => setTypeFlowMode('label')}
+                  aria-current={typeFlowMode === 'label' ? 'page' : undefined}
+                >
+                  Label
+                </button>
+                <button
+                  type="button"
+                  className={`extract-config-stat-icon-flow-tab ${
+                    typeFlowMode === 'verify' ? 'extract-config-stat-icon-flow-tab-active' : ''
+                  }`}
+                  onClick={() => setTypeFlowMode('verify')}
+                  aria-current={typeFlowMode === 'verify' ? 'page' : undefined}
+                >
+                  Verify
+                </button>
+              </nav>
+              {typeFlowMode === 'label' && <StatIconLabeler />}
+              {typeFlowMode === 'verify' && <StatIconVerifier />}
+            </>
+          )}
           {modelSubTab === 'digit' && (
             <p className="extract-config-coming-soon">Coming soon.</p>
           )}

@@ -1591,6 +1591,94 @@
   color: #666;
 }
 
+/* Label / Verify toggle under Type detection tab */
+.extract-config-stat-icon-flow-tabs {
+  display: flex;
+  gap: 0.25rem;
+  margin-bottom: 0.75rem;
+}
+
+.extract-config-stat-icon-flow-tab {
+  padding: 0.35rem 0.65rem;
+  font-size: 0.9rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  background: #f5f5f5;
+  cursor: pointer;
+}
+
+.extract-config-stat-icon-flow-tab:hover {
+  background: #e8e8e8;
+}
+
+.extract-config-stat-icon-flow-tab-active {
+  background: #e0e8f0;
+  border-color: #b0c0d0;
+  font-weight: 500;
+}
+
+/* Stat icon verifier: sections by type, rows of thumbnails */
+.extract-config-stat-icon-verifier {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.extract-config-stat-icon-verify-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.extract-config-stat-icon-verify-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.extract-config-stat-icon-verify-section-heading {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #333;
+}
+
+.extract-config-stat-icon-verify-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.extract-config-stat-icon-verify-thumb-wrap {
+  padding: 0.25rem;
+  border: 2px solid transparent;
+  border-radius: 6px;
+  background: #fafafa;
+  cursor: pointer;
+}
+
+.extract-config-stat-icon-verify-thumb-wrap:hover {
+  background: #f0f0f0;
+}
+
+.extract-config-stat-icon-verify-thumb-selected {
+  border-color: #4a90d9;
+  background: #e8f0f8;
+}
+
+.extract-config-stat-icon-verify-thumb {
+  display: block;
+  width: 32px;
+  height: 32px;
+  image-rendering: pixelated;
+  image-rendering: -moz-crisp-edges;
+  image-rendering: crisp-edges;
+}
+
+.extract-config-stat-icon-verify-focus {
+  margin-top: 0.5rem;
+}
+
 /* Training preview (test set with boxes) */
 .extract-config-training-preview {
   margin-top: 0.5rem;

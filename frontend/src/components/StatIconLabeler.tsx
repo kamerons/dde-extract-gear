@@ -6,58 +6,12 @@ import {
   getStatTypes,
   type StatIconItem,
 } from '../api/extract';
-
-const ARMOR_STATS = ['base', 'fire', 'electric', 'poison'] as const;
-const TOWER_STATS = ['tower_hp', 'tower_dmg', 'tower_rate', 'tower_range'] as const;
-const HERO_STATS = ['hero_hp', 'hero_dmg', 'hero_rate', 'offense', 'defense', 'hero_speed'] as const;
-
-function statTypeToFriendlyLabel(statType: string): string {
-  if (statType === 'none') return 'None';
-  return statType
-    .split('_')
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-    .join(' ');
-}
-
-function getHotkeyForStatType(statType: string): string | null {
-  if (statType === 'none') return 'Space';
-  const armorIdx = ARMOR_STATS.indexOf(statType as (typeof ARMOR_STATS)[number]);
-  if (armorIdx >= 0) return `Ctrl+${armorIdx + 1}`;
-  const towerIdx = TOWER_STATS.indexOf(statType as (typeof TOWER_STATS)[number]);
-  if (towerIdx >= 0) return String(towerIdx + 1);
-  const heroIdx = HERO_STATS.indexOf(statType as (typeof HERO_STATS)[number]);
-  if (heroIdx >= 0) return `Alt+${heroIdx + 1}`;
-  return null;
-}
-
-function parseHotkeyToStatType(
-  key: string,
-  shiftKey: boolean,
-  ctrlKey: boolean,
-  altKey: boolean
-): string | null {
-  if (key === ' ' || key === 'Spacebar') return 'none';
-  if (key >= '1' && key <= '4' && ctrlKey && !shiftKey && !altKey) {
-    const i = parseInt(key, 10) - 1;
-    return ARMOR_STATS[i] ?? null;
-  }
-  if (key >= '1' && key <= '4' && !shiftKey && !ctrlKey && !altKey) {
-    const i = parseInt(key, 10) - 1;
-    return TOWER_STATS[i] ?? null;
-  }
-  if (key >= '1' && key <= '6' && altKey && !shiftKey && !ctrlKey) {
-    const i = parseInt(key, 10) - 1;
-    return HERO_STATS[i] ?? null;
-  }
-  return null;
-}
-
-const BUTTON_GROUPS: { types: readonly string[] }[] = [
-  { types: ['none'] },
-  { types: ARMOR_STATS },
-  { types: TOWER_STATS },
-  { types: HERO_STATS },
-];
+import {
+  statTypeToFriendlyLabel,
+  getHotkeyForStatType,
+  parseHotkeyToStatType,
+  BUTTON_GROUPS,
+} from '../lib/statIconLabeling';
 
 export function StatIconLabeler() {
   const [items, setItems] = useState<StatIconItem[]>([]);
