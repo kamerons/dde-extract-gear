@@ -22,6 +22,7 @@ import { OriginScaleEditor } from './OriginScaleEditor';
 import { TrainingPreview } from './TrainingPreview';
 import { StatIconLabeler } from './StatIconLabeler';
 import { StatIconVerifier } from './StatIconVerifier';
+import { DigitLabeler } from './DigitLabeler';
 import { AccuracyStats } from './AccuracyStats';
 
 const TRAINING_POLL_INTERVAL_MS = 2000;
@@ -537,9 +538,7 @@ export function ExtractTraining() {
               {typeFlowMode === 'verify' && <StatIconVerifier />}
             </>
           )}
-          {modelSubTab === 'digit' && (
-            <p className="extract-config-coming-soon">Coming soon.</p>
-          )}
+          {modelSubTab === 'digit' && <DigitLabeler />}
         </div>
         <div className="extract-config-training-right">
           <p className="stat-section-label">Training</p>

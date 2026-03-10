@@ -571,6 +571,139 @@ async def save_stat_icon_label(body: SaveStatIconLabelRequest):
     return {"ok": True}
 
 
+# Valid digit labels for digit labeling: 0-9 plus "none" (artifact)
+VALID_DIGIT_LABELS = frozenset("0123456789") | {"none"}
+
+
+def _numbers_unlabeled_dir() -> Path:
+    """Return path to data/unlabeled/numbers."""
+    return (_data_dir() / "unlabeled" / "numbers").resolve()
+
+
+def _numbers_labeled_base() -> Path:
+    """Return path to data/labeled/numbers."""
+    return (_data_dir() / "labeled" / "numbers").resolve()
+
+
+def _digit_filename_safe(filename: str) -> None:
+    """Raise if filename is invalid (path traversal)."""
+    if "/" in filename or "\\" in filename or not filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    if Path(filename).suffix.lower() != ".png":
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+
+def _find_digit_path(filename: str) -> tuple[Path, str | None]:
+    """
+    Find digit file by filename. Look in unlabeled first, then in each labeled/numbers/<label>/.
+    Returns (absolute_path, current_digit_label_or_None).
+    Raises HTTPException if not found.
+    """
+    _digit_filename_safe(filename)
+    unlabeled_dir = _numbers_unlabeled_dir()
+    unlabeled_path = (unlabeled_dir / filename).resolve()
+    try:
+        unlabeled_path.relative_to(unlabeled_dir)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    if unlabeled_path.exists() and unlabeled_path.is_file():
+        return (unlabeled_path, None)
+    labeled_base = _numbers_labeled_base()
+    if labeled_base.exists():
+        for subdir in sorted(labeled_base.iterdir()):
+            if subdir.is_dir() and subdir.name in VALID_DIGIT_LABELS:
+                path = (subdir / filename).resolve()
+                try:
+                    path.relative_to(subdir)
+                except ValueError:
+                    continue
+                if path.exists() and path.is_file():
+                    return (path, subdir.name)
+    raise HTTPException(status_code=404, detail="Digit image not found")
+
+
+def _list_all_digit_items() -> list[dict]:
+    """Build list of all digit items: { filename, digit_label } (digit_label null if unlabeled)."""
+    seen: set[str] = set()
+    items: list[dict] = []
+    unlabeled_dir = _numbers_unlabeled_dir()
+    if unlabeled_dir.exists():
+        for p in sorted(unlabeled_dir.iterdir()):
+            if p.suffix.lower() == ".png" and p.is_file():
+                name = p.name
+                if name not in seen:
+                    seen.add(name)
+                    items.append({"filename": name, "digit_label": None})
+    labeled_base = _numbers_labeled_base()
+    if labeled_base.exists():
+        for subdir in sorted(labeled_base.iterdir()):
+            if subdir.is_dir() and subdir.name in VALID_DIGIT_LABELS:
+                for p in sorted(subdir.iterdir()):
+                    if p.suffix.lower() == ".png" and p.is_file():
+                        name = p.name
+                        if name not in seen:
+                            seen.add(name)
+                            items.append({"filename": name, "digit_label": subdir.name})
+    items.sort(key=lambda x: x["filename"])
+    return items
+
+
+@router.get("/api/extract/digits/list")
+async def list_all_digits():
+    """List all digit images (unlabeled and labeled) with current label. For navigation and re-labeling."""
+    return {"items": _list_all_digit_items()}
+
+
+@router.get("/api/extract/digits/{filename}")
+async def serve_digit(filename: str):
+    """Serve a digit image from unlabeled/numbers or labeled/numbers/<label>/."""
+    path, _ = _find_digit_path(filename)
+    return FileResponse(path, media_type="image/png")
+
+
+class SaveDigitLabelRequest(BaseModel):
+    """Request body for POST /api/extract/digits/save-label."""
+
+    filename: str
+    digit_label: str
+
+
+@router.post("/api/extract/digits/save-label")
+async def save_digit_label(body: SaveDigitLabelRequest):
+    """
+    Set digit label: move from unlabeled to labeled, or move between labeled dirs (re-label).
+    File is found in unlabeled/numbers or labeled/numbers/<any_label>/.
+    """
+    if body.digit_label not in VALID_DIGIT_LABELS:
+        raise HTTPException(
+            status_code=400, detail=f"Invalid digit_label; must be one of {sorted(VALID_DIGIT_LABELS)}"
+        )
+    try:
+        src, _ = _find_digit_path(body.filename)
+    except HTTPException:
+        raise
+    dest_dir = (_data_dir() / "labeled" / "numbers" / body.digit_label).resolve()
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = (dest_dir / body.filename).resolve()
+    try:
+        dest.relative_to(dest_dir)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    if src == dest:
+        return {"ok": True}
+    try:
+        src.rename(dest)
+    except OSError as e:
+        logger.exception("Failed to move digit image")
+        if getattr(e, "errno", None) == 30:
+            raise HTTPException(
+                status_code=503,
+                detail="The data directory is read-only. Mount the data volume with write access.",
+            ) from e
+        raise HTTPException(status_code=500, detail="Failed to save label") from e
+    return {"ok": True}
+
+
 @router.post("/api/extract/boxes")
 async def post_boxes(body: BoxesRequest):
     """

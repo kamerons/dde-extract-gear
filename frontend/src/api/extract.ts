@@ -252,6 +252,54 @@ export async function getStatTypes(): Promise<{ stat_types: string[] }> {
   return response.json();
 }
 
+// --- Digit labeling ---
+
+export interface DigitItem {
+  filename: string;
+  digit_label: string | null;
+}
+
+/**
+ * List all digit images (unlabeled and labeled) with current label.
+ */
+export async function listAllDigits(): Promise<{ items: DigitItem[] }> {
+  const response = await fetch(`${API_BASE_URL}/api/extract/digits/list`);
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Failed to list digits: ${response.status} ${text}`);
+  }
+  return response.json();
+}
+
+/**
+ * Return the URL for a digit image (served from unlabeled or labeled dir).
+ */
+export function getDigitUrl(filename: string): string {
+  return `${API_BASE_URL}/api/extract/digits/${encodeURIComponent(filename)}`;
+}
+
+/**
+ * Save digit label: move file to labeled/numbers/<digitLabel>/.
+ */
+export async function saveDigitLabel(filename: string, digitLabel: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/api/extract/digits/save-label`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ filename, digit_label: digitLabel }),
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    let message = text;
+    try {
+      const body = JSON.parse(text) as { detail?: string };
+      if (typeof body.detail === 'string') message = body.detail;
+    } catch {
+      message = `Failed to save digit label: ${response.status} ${text}`;
+    }
+    throw new Error(message);
+  }
+}
+
 /**
  * Compute region boxes for the first card given origin, scale, and image type.
  * Returns boxes in full-resolution coordinates; scale to 50% in the UI for display.

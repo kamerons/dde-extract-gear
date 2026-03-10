@@ -17,8 +17,8 @@ if str(_repo_root) not in sys.path:
 from shared.stat_digit_extract import extract_digits
 from shared.stat_normalizer import StatNormalizer
 
-# Valid stat-type dirs under labeled/icons (same as icon_type_detector_processor)
-VALID_STAT_TYPES = frozenset(StatNormalizer.STAT_GROUPS.keys()) | {"none"}
+# Stat-type dirs to use for digit extraction; exclude "none" (no real stat value)
+VALID_STAT_TYPES = frozenset(StatNormalizer.STAT_GROUPS.keys())
 
 # Expected stat icon size (shared/extract_regions STAT_SIZE)
 STAT_ICON_HEIGHT = 56
