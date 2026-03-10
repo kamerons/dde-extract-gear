@@ -94,6 +94,26 @@ class Config:
         get_nested(_config_data, "icon_type_detection", "initial_learning_rate", default=0.0001)
     )
 
+    # Digit detection (for training params / API)
+    DIGIT_DETECTION_TEST_RATIO: float = float(
+        get_nested(_config_data, "digit_detection", "test_ratio", default=0.25)
+    )
+    DIGIT_DETECTION_TRAINING_EPOCHS: int = max(
+        1,
+        int(get_nested(_config_data, "digit_detection", "training_epochs", default=1000)),
+    )
+    DIGIT_DETECTION_MODEL_PATH: str = str(
+        get_nested(
+            _config_data,
+            "digit_detection",
+            "model_path",
+            default="data/models/digit_detection/digit_detector_model",
+        )
+    )
+    DIGIT_DETECTION_INITIAL_LEARNING_RATE: float = float(
+        get_nested(_config_data, "digit_detection", "initial_learning_rate", default=0.0001)
+    )
+
     @property
     def augment_shifts_regular(self) -> tuple[float, float, float, float]:
         """(x_neg, x_pos, y_neg, y_pos) crop margins for regular screenshots; not used to cap translation."""

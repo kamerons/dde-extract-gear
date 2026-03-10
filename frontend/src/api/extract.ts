@@ -351,8 +351,8 @@ export interface TrainingTaskStatus {
   task_id: string;
   status: 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled' | 'not_found';
   task_type?: string;
-  /** Set for training tasks: 'box_detector' | 'icon_type'. */
-  model_type?: 'box_detector' | 'icon_type';
+  /** Set for training tasks: 'box_detector' | 'icon_type' | 'digit_detector'. */
+  model_type?: 'box_detector' | 'icon_type' | 'digit_detector';
   progress?: { evaluated: number; total_planned: number };
   /** Includes train_samples, test_samples when present; box detector has accuracy_within_*px, icon_type has val_accuracy/accuracy. */
   results?: Record<string, unknown> & { train_samples?: number; test_samples?: number };
@@ -441,8 +441,8 @@ export async function getTrainingParams(): Promise<TrainingParamsResponse> {
 }
 
 export interface TrainingStartOptions {
-  /** Which model to train: box_detector (screenshots) or icon_type (stat icon classification). */
-  model_type?: 'box_detector' | 'icon_type';
+  /** Which model to train: box_detector (screenshots), icon_type (stat icon), or digit_detector (digit classification). */
+  model_type?: 'box_detector' | 'icon_type' | 'digit_detector';
   training_epochs?: number;
   initial_learning_rate?: number;
 }

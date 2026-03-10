@@ -92,7 +92,9 @@ export function ExtractTraining() {
   const [extractConfig, setExtractConfig] = useState<ExtractConfigResponse | null>(null);
   const [trainingTaskId, setTrainingTaskId] = useState<string | null>(null);
   const [trainingStatus, setTrainingStatus] = useState<TrainingTaskStatus['status'] | null>(null);
-  const [currentTrainingModelType, setCurrentTrainingModelType] = useState<'box_detector' | 'icon_type' | null>(null);
+  const [currentTrainingModelType, setCurrentTrainingModelType] = useState<
+    'box_detector' | 'icon_type' | 'digit_detector' | null
+  >(null);
   const [trainingProgress, setTrainingProgress] = useState<{ evaluated: number; total_planned: number } | null>(null);
   const [trainingResults, setTrainingResults] = useState<Record<string, number | string> | null>(null);
   const [trainingError, setTrainingError] = useState<string | null>(null);
@@ -282,7 +284,8 @@ export function ExtractTraining() {
     prevEvalKeyRef.current = null;
     lastEpochWithPreviewRef.current = -1;
     taskPreviewExpectedDurationMsRef.current = null;
-    const model_type = modelSubTab === 'type' ? 'icon_type' : 'box_detector';
+    const model_type =
+      modelSubTab === 'type' ? 'icon_type' : modelSubTab === 'digit' ? 'digit_detector' : 'box_detector';
     try {
       const { task_id } = await startTraining({
         model_type,
@@ -306,7 +309,8 @@ export function ExtractTraining() {
     prevEvalKeyRef.current = null;
     lastEpochWithPreviewRef.current = -1;
     taskPreviewExpectedDurationMsRef.current = null;
-    const model_type = modelSubTab === 'type' ? 'icon_type' : 'box_detector';
+    const model_type =
+      modelSubTab === 'type' ? 'icon_type' : modelSubTab === 'digit' ? 'digit_detector' : 'box_detector';
     try {
       const { task_id } = await startTrainingResumingFromExisting({
         model_type,
@@ -339,7 +343,11 @@ export function ExtractTraining() {
       try {
         const res = await getTrainingTaskStatus(taskId);
         setTrainingStatus(res.status);
-        if (res.model_type === 'box_detector' || res.model_type === 'icon_type') {
+        if (
+          res.model_type === 'box_detector' ||
+          res.model_type === 'icon_type' ||
+          res.model_type === 'digit_detector'
+        ) {
           setCurrentTrainingModelType(res.model_type);
         }
         if (res.progress) setTrainingProgress(res.progress);
@@ -384,7 +392,11 @@ export function ExtractTraining() {
         if (res.status === 'completed' || res.status === 'failed' || res.status === 'cancelled' || res.status === 'not_found') {
           setTrainingTaskId(null);
           lastEpochWithEvalRequestedRef.current = -1;
-          if (res.model_type !== 'box_detector' && res.model_type !== 'icon_type') {
+          if (
+            res.model_type !== 'box_detector' &&
+            res.model_type !== 'icon_type' &&
+            res.model_type !== 'digit_detector'
+          ) {
             setCurrentTrainingModelType(null);
           }
         }
@@ -672,11 +684,14 @@ export function ExtractTraining() {
                   Train: {Number(trainingResults.train_samples)}, Test: {Number(trainingResults.test_samples)} samples
                 </p>
               )}
-              {(currentTrainingModelType === 'icon_type' || (currentTrainingModelType == null && typeof trainingResults.val_accuracy === 'number')) && typeof trainingResults.val_accuracy === 'number' && (
-                <p className="extract-config-training-samples" role="status">
-                  Test accuracy: {(Number(trainingResults.val_accuracy) * 100).toFixed(2)}%
-                </p>
-              )}
+              {(currentTrainingModelType === 'icon_type' ||
+                currentTrainingModelType === 'digit_detector' ||
+                (currentTrainingModelType == null && typeof trainingResults.val_accuracy === 'number')) &&
+                typeof trainingResults.val_accuracy === 'number' && (
+                  <p className="extract-config-training-samples" role="status">
+                    Test accuracy: {(Number(trainingResults.val_accuracy) * 100).toFixed(2)}%
+                  </p>
+                )}
               {(currentTrainingModelType === 'box_detector' || (currentTrainingModelType == null && typeof (trainingResults as Record<string, unknown>).accuracy_within_5px === 'number')) && (typeof trainingResults.test_mae_x === 'number' || typeof trainingResults.test_mae_y === 'number') && (
                 <ul>
                   {typeof trainingResults.test_mae_x === 'number' && (

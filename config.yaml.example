@@ -42,3 +42,10 @@ box_detector:
   training_epochs: 1000
   preview_every_n_epochs: 20
   preview_ms_per_image: 244  # used to compute preview_expected_duration_ms for frontend (n_items * this)
+
+# Digit detector training (0-9 + none classification from data/labeled/numbers/<label>/)
+digit_detection:
+  test_ratio: 0.25
+  model_path: data/models/digit_detection/digit_detector_model
+  training_epochs: 1000
+  initial_learning_rate: 0.0001

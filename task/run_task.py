@@ -17,6 +17,7 @@ import redis
 from task.config import Config
 from task.redis_updates import update_task_progress, update_task_status
 from task.processors.box_detector_processor import BoxDetectorProcessor
+from task.processors.digit_detector_processor import DigitDetectorProcessor
 from task.processors.icon_type_detector_processor import IconTypeDetectorProcessor
 from task.processors.recommendation_processor import RecommendationProcessor
 from task.processors.evaluation_processor import (
@@ -99,6 +100,46 @@ def _run_training(
                 task_id=task_id,
                 progress_callback=progress_callback_icon,
                 check_cancelled=check_cancelled_icon,
+            )
+            return results
+        except TaskCancelledError:
+            raise
+        except Exception as e:
+            return {"error": "training_failed", "message": str(e)}
+
+    if model_type == "digit_detector":
+        training_epochs_digit = task_data.get("training_epochs")
+        if training_epochs_digit is not None:
+            training_epochs_digit = max(1, int(training_epochs_digit))
+        else:
+            training_epochs_digit = config.DIGIT_DETECTION_TRAINING_EPOCHS
+        initial_lr_digit = task_data.get("initial_learning_rate")
+        if initial_lr_digit is not None:
+            initial_lr_digit = float(initial_lr_digit)
+        else:
+            initial_lr_digit = config.DIGIT_DETECTION_INITIAL_LEARNING_RATE
+        digit_processor = DigitDetectorProcessor(
+            data_dir=config.DATA_DIR,
+            model_path=config.DIGIT_DETECTION_MODEL_PATH,
+            test_ratio=config.DIGIT_DETECTION_TEST_RATIO,
+            epochs=training_epochs_digit,
+            initial_learning_rate=initial_lr_digit,
+        )
+
+        def progress_callback_digit(epoch: int, total_epochs: int, metrics: Dict) -> None:
+            update_task_progress(
+                redis_client, task_id, evaluated=epoch, total_planned=total_epochs, partial_results=metrics
+            )
+            redis_client.setex(f"task:{task_id}:eval", 3600, json.dumps(metrics))
+
+        def check_cancelled_digit() -> bool:
+            return redis_client.get(f"task:{task_id}:cancelled") == "1"
+
+        try:
+            results = digit_processor.process(
+                task_id=task_id,
+                progress_callback=progress_callback_digit,
+                check_cancelled=check_cancelled_digit,
             )
             return results
         except TaskCancelledError:
