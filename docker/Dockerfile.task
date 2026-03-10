@@ -5,6 +5,10 @@ FROM tensorflow/tensorflow:2.15.0-gpu
 
 WORKDIR /app
 
+# System deps for verification: pytesseract calls the tesseract binary
+RUN apt-get update && apt-get install -y --no-install-recommends tesseract-ocr \
+    && rm -rf /var/lib/apt/lists/*
+
 # Copy requirements and install dependencies (TensorFlow is already in the image)
 COPY requirements.txt /app/
 RUN pip install --no-cache-dir -r requirements.txt

@@ -21,6 +21,7 @@ class TaskService:
     TRAINING_QUEUE_KEY = "training_tasks"
     TRAINING_CURRENT_TASK_KEY = "training_current_task_id"
     EVALUATION_QUEUE_KEY = "evaluation_tasks"
+    VERIFICATION_QUEUE_KEY = "verification_tasks"
     LATEST_PREVIEW_KEY = "extract:training:latest_preview"
 
     def __init__(self):
@@ -185,6 +186,26 @@ class TaskService:
         self.redis_client.rpush(self.EVALUATION_QUEUE_KEY, json.dumps(task_data))
 
         logger.info(f"Created evaluation task {task_id} (type={eval_type})")
+        return task_id
+
+    def create_verification_task(self, filename: str, subdir: str) -> str:
+        """
+        Create a card verification task (runs on task container; loads icon/digit models).
+        Returns task_id. Client should poll GET /api/tasks/{task_id} for results.
+        """
+        task_id = str(uuid.uuid4())
+        task_meta = {
+            "task_id": task_id,
+            "status": "pending",
+            "task_type": "verification",
+            "created_at": datetime.utcnow().isoformat(),
+        }
+        meta_key = f"task:{task_id}:meta"
+        self.redis_client.hset(meta_key, mapping=task_meta)
+        self.redis_client.expire(meta_key, self.TASK_EXPIRY_SECONDS)
+        task_data = {"task_id": task_id, "filename": filename, "subdir": subdir}
+        self.redis_client.rpush(self.VERIFICATION_QUEUE_KEY, json.dumps(task_data))
+        logger.info("Created verification task %s (filename=%s, subdir=%s)", task_id, filename, subdir)
         return task_id
 
     def get_current_training_task_id(self) -> str | None:

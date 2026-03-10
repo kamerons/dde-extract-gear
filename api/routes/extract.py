@@ -412,6 +412,41 @@ async def get_screenshot_origin(
     return {"origin_x": origin_x, "origin_y": origin_y}
 
 
+class VerifyScreenshotRequest(BaseModel):
+    """Request body for POST /api/extract/verify."""
+
+    filename: str
+    subdir: str  # labeled/screenshots/regular | labeled/screenshots/blueprint
+
+
+@router.post("/api/extract/verify")
+async def verify_screenshot(body: VerifyScreenshotRequest):
+    """
+    Start full-card verification on a labeled screenshot (runs on task container).
+    Requires a saved origin (.txt). Returns task_id; poll GET /api/tasks/{task_id} for results.
+    When completed, results contain armor_set, current_level, max_level, stats, error.
+    """
+    if body.subdir not in LABELED_SCREENSHOT_SUBDIRS_WRITABLE:
+        raise HTTPException(
+            status_code=400,
+            detail="subdir must be labeled/screenshots/regular or labeled/screenshots/blueprint",
+        )
+    if "/" in body.filename or "\\" in body.filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    path = _screenshot_path(body.filename, body.subdir)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Screenshot not found")
+    txt_path = path.with_suffix(".txt")
+    if not txt_path.exists():
+        raise HTTPException(status_code=404, detail="No saved origin for this screenshot")
+    try:
+        task_id = task_service.create_verification_task(body.filename, body.subdir)
+    except Exception as e:
+        logger.exception("Failed to create verification task")
+        raise HTTPException(status_code=500, detail="Failed to create verification task") from e
+    return {"task_id": task_id, "status": "pending"}
+
+
 @router.get("/api/extract/screenshots/{filename}")
 async def serve_screenshot(
     filename: str,

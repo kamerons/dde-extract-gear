@@ -2,11 +2,12 @@ import { useState } from 'react';
 import { InitialConfiguration } from './components/InitialConfiguration';
 import { ResultsScreen } from './components/ResultsScreen';
 import { ExtractTraining } from './components/ExtractTraining';
+import { ExtractVerification } from './components/ExtractVerification';
 import type { BuildPreferences } from './types';
 import './App.css';
 
 type View = 'configuration' | 'results';
-type Tab = 'recommendations' | 'training';
+type Tab = 'recommendations' | 'training' | 'verification';
 
 function App() {
   const [currentView, setCurrentView] = useState<View>('configuration');
@@ -53,9 +54,17 @@ function App() {
         >
           Training
         </button>
+        <button
+          type="button"
+          className={`app-tab ${activeTab === 'verification' ? 'app-tab-active' : ''}`}
+          onClick={() => setActiveTab('verification')}
+          aria-current={activeTab === 'verification' ? 'page' : undefined}
+        >
+          Verification
+        </button>
       </nav>
       <main
-        className={`app-tab-panel${activeTab === 'training' ? ' app-tab-panel--training' : ''}`}
+        className={`app-tab-panel${activeTab === 'training' ? ' app-tab-panel--training' : ''}${activeTab === 'verification' ? ' app-tab-panel--verification' : ''}`}
       >
         {activeTab === 'recommendations' && (
           <InitialConfiguration
@@ -65,6 +74,7 @@ function App() {
           />
         )}
         {activeTab === 'training' && <ExtractTraining />}
+        {activeTab === 'verification' && <ExtractVerification />}
       </main>
     </div>
   );

@@ -38,6 +38,7 @@ class TaskWorker:
     TRAINING_QUEUE_NAME = "training_tasks"
     TRAINING_CURRENT_TASK_KEY = "training_current_task_id"
     EVALUATION_QUEUE_NAME = "evaluation_tasks"
+    VERIFICATION_QUEUE_NAME = "verification_tasks"
     CURRENT_TASK_EXPIRY = 3600  # seconds (clears if worker dies)
     POLL_INTERVAL = 1.0  # seconds
 
@@ -161,6 +162,21 @@ class TaskWorker:
             logger.info("Completed training task %s", task_id)
             return
 
+    def process_verification_task(self, task_data: Dict) -> None:
+        """Run one verification task in a subprocess (loads icon/digit models on task container)."""
+        task_id = task_data.get("task_id", "")
+        logger.info("Processing verification task %s", task_id)
+        self.redis_client.hset(
+            f"task:{task_id}:meta",
+            mapping={"status": "processing", "task_type": "verification"},
+        )
+        proc = self._spawn_run_task("verification", task_data)
+        if proc.returncode != 0:
+            status = self.redis_client.hget(f"task:{task_id}:meta", "status")
+            if status == "processing":
+                error_msg = (proc.stderr or "Verification subprocess failed")[:500]
+                update_task_status(self.redis_client, task_id, "failed", error=error_msg)
+
     def process_task(self, task_data: Dict) -> None:
         """Orchestrate a recommendation task: run in subprocess, then clear current key."""
         task_id = task_data["task_id"]
@@ -190,11 +206,15 @@ class TaskWorker:
                 )
 
     def _long_running_loop(self) -> None:
-        """Single thread: pop one training or recommendation task at a time, run in subprocess."""
+        """Single thread: pop one training, verification, or recommendation task at a time, run in subprocess."""
         while self.running:
             try:
                 task_data_str = self.redis_client.brpop(
-                    [self.TRAINING_QUEUE_NAME, self.QUEUE_NAME],
+                    [
+                        self.TRAINING_QUEUE_NAME,
+                        self.VERIFICATION_QUEUE_NAME,
+                        self.QUEUE_NAME,
+                    ],
                     timeout=int(self.POLL_INTERVAL),
                 )
                 if not task_data_str:
@@ -203,6 +223,8 @@ class TaskWorker:
                 task_data = json.loads(data)
                 if queue_name == self.TRAINING_QUEUE_NAME:
                     self.process_training_task(task_data)
+                elif queue_name == self.VERIFICATION_QUEUE_NAME:
+                    self.process_verification_task(task_data)
                 else:
                     self.process_task(task_data)
             except redis.ConnectionError as e:

@@ -25,11 +25,13 @@ from task.processors.evaluation_processor import (
     run_model_evaluation_combined as eval_run_model_evaluation_combined,
     run_preview as eval_run_preview,
 )
+from shared.card_verification import verify_card
 from shared.recommendation_engine import TaskCancelledError
 
 LATEST_PREVIEW_KEY = "extract:training:latest_preview"
 PREVIEW_TTL = 3600
 EVALUATION_QUEUE_NAME = "evaluation_tasks"
+VERIFICATION_QUEUE_NAME = "verification_tasks"
 CURRENT_TASK_EXPIRY = 3600
 QUEUE_NAME = "recommendation_tasks"
 CURRENT_TASK_KEY = "recommendation_current_task_id"
@@ -297,6 +299,76 @@ def run_training(redis_client: redis.Redis, config: Config, task_data: Dict[str,
     return {k: v for k, v in results.items() if k != "final_preview"}
 
 
+def run_verification(redis_client: redis.Redis, config: Config, task_data: Dict[str, Any]) -> int:
+    """Run one card verification task on the task container (loads icon/digit models). Returns exit code 0 or 1."""
+    task_id = task_data["task_id"]
+    filename = task_data.get("filename", "")
+    subdir = task_data.get("subdir", "")
+    logger.info("Processing verification task %s (filename=%s, subdir=%s)", task_id, filename, subdir)
+    redis_client.hset(
+        f"task:{task_id}:meta",
+        mapping={"status": "processing", "task_type": "verification"},
+    )
+    repo_root = Path(__file__).resolve().parent.parent
+    data_dir = (repo_root / config.DATA_DIR).resolve()
+    image_path = (data_dir / subdir / filename).resolve()
+    try:
+        image_path.relative_to(data_dir)
+    except ValueError:
+        update_task_status(redis_client, task_id, "failed", error="Invalid filename or subdir")
+        return 1
+    if not image_path.exists():
+        update_task_status(redis_client, task_id, "failed", error="Screenshot not found")
+        return 1
+    txt_path = image_path.with_suffix(".txt")
+    if not txt_path.exists():
+        update_task_status(redis_client, task_id, "failed", error="No saved origin for this screenshot")
+        return 1
+    try:
+        line = txt_path.read_text().strip()
+        parts = line.split()
+        if len(parts) != 2:
+            update_task_status(redis_client, task_id, "failed", error="Invalid origin file format")
+            return 1
+        origin_x = int(parts[0])
+        origin_y = int(parts[1])
+    except (OSError, ValueError) as e:
+        update_task_status(redis_client, task_id, "failed", error=f"Failed to read origin: {e}")
+        return 1
+    image_type = "blueprint" if "blueprint" in subdir else "regular"
+    scale = (
+        config.EXTRACT_BLUEPRINT_SCALE
+        if image_type == "blueprint"
+        else config.EXTRACT_REGULAR_SCALE
+    )
+    try:
+        result = verify_card(
+            str(image_path),
+            origin_x,
+            origin_y,
+            scale,
+            image_type,
+            data_dir=data_dir,
+            return_debug=True,
+        )
+        results = {
+            "armor_set": result.armor_set,
+            "current_level": result.current_level,
+            "max_level": result.max_level,
+            "stats": result.stats,
+            "error": result.error,
+        }
+        if result.debug is not None:
+            results["debug"] = result.debug
+        update_task_status(redis_client, task_id, "completed", results=results)
+        logger.info("Completed verification task %s", task_id)
+        return 0
+    except Exception as e:
+        logger.exception("Failed to process verification task %s", task_id)
+        update_task_status(redis_client, task_id, "failed", error=str(e))
+        return 1
+
+
 def run_evaluation(redis_client: redis.Redis, config: Config, task_data: Dict[str, Any]) -> int:
     """Run one evaluation task. Returns exit code 0 or 1."""
     task_id = task_data["task_id"]
@@ -442,7 +514,9 @@ def run_recommendation(redis_client: redis.Redis, config: Config, task_data: Dic
 
 def main() -> int:
     if len(sys.argv) != 3:
-        logger.error("Usage: python -m task.run_task <training|evaluation|recommendation> '<json_payload>'")
+        logger.error(
+            "Usage: python -m task.run_task <training|evaluation|recommendation|verification> '<json_payload>'"
+        )
         return 1
     task_type = sys.argv[1].lower().strip()
     try:
@@ -450,7 +524,7 @@ def main() -> int:
     except json.JSONDecodeError as e:
         logger.error("Invalid JSON payload: %s", e)
         return 1
-    if task_type not in ("training", "evaluation", "recommendation"):
+    if task_type not in ("training", "evaluation", "recommendation", "verification"):
         logger.error("Unknown task type: %s", task_type)
         return 1
 
@@ -475,6 +549,9 @@ def main() -> int:
 
     if task_type == "evaluation":
         return run_evaluation(redis_client, config, task_data)
+
+    if task_type == "verification":
+        return run_verification(redis_client, config, task_data)
 
     return run_recommendation(redis_client, config, task_data)
 

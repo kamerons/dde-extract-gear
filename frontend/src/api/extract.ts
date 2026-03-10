@@ -179,6 +179,69 @@ export function getScreenshotUrl(
   return `${API_BASE_URL}/api/extract/screenshots/${encodeURIComponent(filename)}?${params}`;
 }
 
+// --- Verification (full-card verify on labeled screenshots; runs on task container) ---
+
+export interface VerificationStartResponse {
+  task_id: string;
+  status: string;
+}
+
+/** Debug images (base64 PNG) and OCR text returned when verification includes debug payload. */
+export interface VerificationDebug {
+  region_set?: string;
+  region_level?: string;
+  region_stat_crops?: string[];
+  preprocess_set?: string;
+  preprocess_level?: string;
+  preprocess_stat_crops?: string[];
+  /** Raw text returned by OCR for the set (armor set) region. */
+  ocr_set?: string;
+  /** Raw text returned by OCR for the level region (expected format: "1 / 16"). */
+  ocr_level?: string;
+  /** Error message if OCR failed for the set region (e.g. tesseract not found). */
+  ocr_set_error?: string;
+  /** Error message if OCR failed for the level region. */
+  ocr_level_error?: string;
+}
+
+/** Verification result when task completes (from GET /api/tasks/{task_id} results). */
+export interface VerificationResponse {
+  armor_set: string | null;
+  current_level: number | null;
+  max_level: number | null;
+  stats: Record<string, number>;
+  error: string | null;
+  debug?: VerificationDebug | null;
+}
+
+/**
+ * Start full-card verification on a labeled screenshot. Returns task_id.
+ * Poll getTrainingTaskStatus(task_id) until status is 'completed' or 'failed';
+ * when completed, status.results is VerificationResponse.
+ */
+export async function verifyScreenshot(
+  filename: string,
+  subdir: string
+): Promise<VerificationStartResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/extract/verify`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ filename, subdir }),
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    let message = text;
+    try {
+      const body = JSON.parse(text) as { detail?: string };
+      if (typeof body.detail === 'string') message = body.detail;
+    } catch {
+      message = `Failed to start verification: ${response.status} ${text}`;
+    }
+    throw new Error(message);
+  }
+  return response.json();
+}
+
 // --- Stat icon labeling (type detection) ---
 
 /**
