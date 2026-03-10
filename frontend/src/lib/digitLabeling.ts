@@ -25,6 +25,7 @@ export function getHotkeyForDigitLabel(label: string): string | null {
 }
 
 export function digitLabelToFriendlyLabel(label: string): string {
+  if (label === 'unlabeled') return 'Unlabeled';
   if (label === ARTIFACT_LABEL) return 'Not a digit';
   return label;
 }
@@ -32,4 +33,11 @@ export function digitLabelToFriendlyLabel(label: string): string {
 export const BUTTON_GROUPS: { types: readonly string[] }[] = [
   { types: [ARTIFACT_LABEL] },
   { types: [...DIGIT_LABELS] },
+];
+
+/** Display order for verification: unlabeled first, then none, then 0-9. */
+export const VERIFY_TYPE_ORDER: string[] = [
+  'unlabeled',
+  ARTIFACT_LABEL,
+  ...DIGIT_LABELS,
 ];

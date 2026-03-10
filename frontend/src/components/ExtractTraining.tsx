@@ -23,6 +23,7 @@ import { TrainingPreview } from './TrainingPreview';
 import { StatIconLabeler } from './StatIconLabeler';
 import { StatIconVerifier } from './StatIconVerifier';
 import { DigitLabeler } from './DigitLabeler';
+import { DigitVerifier } from './DigitVerifier';
 import { AccuracyStats } from './AccuracyStats';
 
 const TRAINING_POLL_INTERVAL_MS = 2000;
@@ -70,6 +71,7 @@ function EvalCountdownCircle({ progress }: { progress: number }) {
 
 type ModelSubTab = 'box_detector' | 'type' | 'digit';
 type TypeFlowMode = 'label' | 'verify';
+type DigitFlowMode = 'label' | 'verify';
 
 function evalResponseKey(e: EvaluateResponse | IconTypeEvalResponse): string {
   if (typeof (e as IconTypeEvalResponse).val_accuracy === 'number') {
@@ -86,6 +88,7 @@ function isBoxDetectorEval(e: EvaluateResponse | IconTypeEvalResponse): e is Eva
 export function ExtractTraining() {
   const [modelSubTab, setModelSubTab] = useState<ModelSubTab>('type');
   const [typeFlowMode, setTypeFlowMode] = useState<TypeFlowMode>('label');
+  const [digitFlowMode, setDigitFlowMode] = useState<DigitFlowMode>('label');
   const [extractConfig, setExtractConfig] = useState<ExtractConfigResponse | null>(null);
   const [trainingTaskId, setTrainingTaskId] = useState<string | null>(null);
   const [trainingStatus, setTrainingStatus] = useState<TrainingTaskStatus['status'] | null>(null);
@@ -538,7 +541,37 @@ export function ExtractTraining() {
               {typeFlowMode === 'verify' && <StatIconVerifier />}
             </>
           )}
-          {modelSubTab === 'digit' && <DigitLabeler />}
+          {modelSubTab === 'digit' && (
+            <>
+              <nav
+                className="extract-config-stat-icon-flow-tabs"
+                aria-label="Label or verify digits"
+              >
+                <button
+                  type="button"
+                  className={`extract-config-stat-icon-flow-tab ${
+                    digitFlowMode === 'label' ? 'extract-config-stat-icon-flow-tab-active' : ''
+                  }`}
+                  onClick={() => setDigitFlowMode('label')}
+                  aria-current={digitFlowMode === 'label' ? 'page' : undefined}
+                >
+                  Label
+                </button>
+                <button
+                  type="button"
+                  className={`extract-config-stat-icon-flow-tab ${
+                    digitFlowMode === 'verify' ? 'extract-config-stat-icon-flow-tab-active' : ''
+                  }`}
+                  onClick={() => setDigitFlowMode('verify')}
+                  aria-current={digitFlowMode === 'verify' ? 'page' : undefined}
+                >
+                  Verify
+                </button>
+              </nav>
+              {digitFlowMode === 'label' && <DigitLabeler />}
+              {digitFlowMode === 'verify' && <DigitVerifier />}
+            </>
+          )}
         </div>
         <div className="extract-config-training-right">
           <p className="stat-section-label">Training</p>
