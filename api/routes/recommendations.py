@@ -1,6 +1,7 @@
 """Recommendation endpoints."""
 
 import logging
+from pathlib import Path
 from typing import Dict
 
 from fastapi import APIRouter, HTTPException, Query
@@ -12,12 +13,38 @@ from shared.models import (
     RecommendationPiece
 )
 from shared.recommendation_engine import RecommendationEngine, TooManyCombinationsError
+from api.config import Config
 from api.services.task_service import TaskService
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 task_service = TaskService()
+config = Config()
+
+DATA_COLLECTED_PREFIX = "data/collected/"
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parent.parent.parent
+
+
+def _collected_dir() -> Path:
+    return (_repo_root() / config.DATA_DIR / "collected").resolve()
+
+
+def _normalize_data_file(value: str | None) -> str | None:
+    """Return path like data/collected/sample.json or None. Reject path traversal."""
+    if not value or not value.strip():
+        return None
+    value = value.strip()
+    if ".." in value or value.startswith("/") or (len(value) > 1 and value[1] == ":"):
+        return None
+    if "/" not in value:
+        return DATA_COLLECTED_PREFIX + value if value.endswith(".json") else DATA_COLLECTED_PREFIX + value + ".json"
+    if value.startswith(DATA_COLLECTED_PREFIX):
+        return value
+    return None
 
 # Global state for loaded data (will be initialized in lifespan)
 inventory: list[Dict] = []
@@ -29,6 +56,22 @@ def set_recommendation_engine(engine: RecommendationEngine, inv: list[Dict]):
     global recommendation_engine, inventory
     recommendation_engine = engine
     inventory = inv
+
+
+@router.get("/api/data-files")
+async def list_data_files():
+    """
+    List JSON filenames in data/collected/ for the Recommendations data-file dropdown.
+    Returns {"files": ["sample.json", "run1.json", ...]}.
+    """
+    collected = _collected_dir()
+    if not collected.exists():
+        return {"files": []}
+    files = sorted(
+        p.name for p in collected.iterdir()
+        if p.is_file() and p.suffix.lower() == ".json"
+    )
+    return {"files": files}
 
 
 @router.get("/api/recommendations")
@@ -121,16 +164,25 @@ async def post_recommendations(request: RecommendationRequest):
     weights = request.weights or {}
     constraints = request.constraints.min if request.constraints else {}
     limit = request.limit or 10
+    data_file = None
+    if request.data_file:
+        data_file = _normalize_data_file(request.data_file)
+        if data_file is None:
+            raise HTTPException(
+                status_code=400,
+                detail="data_file must be a filename under data/collected/ (e.g. sample.json or data/collected/sample.json)",
+            )
 
     # Log request
-    logger.info(f"New POST request received: weights={weights}, constraints={constraints}, limit={limit}")
+    logger.info(f"New POST request received: weights={weights}, constraints={constraints}, limit={limit}, data_file={data_file}")
 
     # Create task
     try:
         task_id = task_service.create_task(
             weights=weights,
             constraints=constraints,
-            limit=limit
+            limit=limit,
+            data_file=data_file,
         )
     except Exception as e:
         logger.error(f"Failed to create task: {e}")

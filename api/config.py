@@ -18,7 +18,7 @@ class Config:
     REDIS_PASSWORD: Optional[str] = (str(_redis_password).strip() or None) if _redis_password else None
 
     # Data
-    DATA_FILE_PATH: str = str(get_nested(_config_data, "data", "file_path", default="data/collected.json"))
+    DATA_FILE_PATH: str = str(get_nested(_config_data, "data", "file_path", default="data/collected/sample.json"))
     DATA_DIR: str = str(get_nested(_config_data, "data", "dir", default="data"))
 
     # API

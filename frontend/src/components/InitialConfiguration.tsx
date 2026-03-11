@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { StatType, BuildPreferences } from '../types';
+import { getDataFiles } from '../api/recommendations';
 import { StatMultiSelect } from './StatMultiSelect';
 import { StatNumberInput } from './StatNumberInput';
 
 interface InitialConfigurationProps {
-  onNavigateToResults: (preferences: BuildPreferences) => void;
+  onNavigateToResults: (preferences: BuildPreferences, dataFile?: string) => void;
   onError?: (error: string | null) => void;
   error?: string | null;
 }
@@ -23,6 +24,22 @@ export function InitialConfiguration({
     {} as Record<StatType, number>
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [dataFiles, setDataFiles] = useState<string[]>([]);
+  const [selectedDataFile, setSelectedDataFile] = useState<string>('');
+
+  useEffect(() => {
+    getDataFiles()
+      .then((files) => {
+        setDataFiles(files);
+        if (files.length > 0) {
+          setSelectedDataFile((prev) => {
+            const defaultFile = files.includes('sample.json') ? 'sample.json' : files[0];
+            return prev === '' || !files.includes(prev) ? defaultFile : prev;
+          });
+        }
+      })
+      .catch(() => setDataFiles([]));
+  }, []);
 
   // Validation: can't maximize and ignore the same stat
   const getDisabledStatsForMaximize = (): StatType[] => {
@@ -53,7 +70,7 @@ export function InitialConfiguration({
     setSoftCaps(newSoftCaps);
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = useCallback(() => {
     onError?.(null);
 
     const preferences: BuildPreferences = {
@@ -64,9 +81,9 @@ export function InitialConfiguration({
     };
 
     setIsSubmitting(true);
-    onNavigateToResults(preferences);
+    onNavigateToResults(preferences, selectedDataFile || undefined);
     setIsSubmitting(false);
-  };
+  }, [maximizeStats, ignoreStats, minConstraints, softCaps, selectedDataFile, onNavigateToResults, onError]);
 
   return (
     <div className="configuration-container">
@@ -77,6 +94,34 @@ export function InitialConfiguration({
           know.
         </p>
       </div>
+
+      {dataFiles.length > 0 && (
+        <div className="configuration-section">
+          <h3 className="stat-section-label">Data file</h3>
+          <p className="stat-section-description">
+            Which collected armor data to use for recommendations (from data/collected/).
+          </p>
+          <select
+            id="data-file-select"
+            value={
+              dataFiles.includes(selectedDataFile)
+                ? selectedDataFile
+                : dataFiles.includes('sample.json')
+                  ? 'sample.json'
+                  : dataFiles[0] ?? ''
+            }
+            onChange={(e) => setSelectedDataFile(e.target.value)}
+            className="configuration-data-file-select"
+            aria-label="Select data file"
+          >
+            {dataFiles.map((f) => (
+              <option key={f} value={f}>
+                {f}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       <div className="configuration-sections">
         <div className="configuration-section">

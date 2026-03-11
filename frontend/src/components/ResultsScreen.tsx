@@ -9,6 +9,7 @@ import {
 
 interface ResultsScreenProps {
   initialPreferences: BuildPreferences;
+  initialDataFile?: string;
   onBack: () => void;
 }
 
@@ -33,7 +34,7 @@ function mergeRecommendationsBySetId(
   return result;
 }
 
-export function ResultsScreen({ initialPreferences, onBack }: ResultsScreenProps) {
+export function ResultsScreen({ initialPreferences, initialDataFile, onBack }: ResultsScreenProps) {
   const [taskId, setTaskId] = useState<string | null>(null);
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [status, setStatus] = useState<'pending' | 'processing' | 'completed' | 'failed' | 'cancelled' | 'not_found'>('pending');
@@ -46,7 +47,7 @@ export function ResultsScreen({ initialPreferences, onBack }: ResultsScreenProps
     if (!initialPreferences || taskId !== null) return;
     let cancelled = false;
     setStatus('pending');
-    submitInitialPreferencesAsync(initialPreferences)
+    submitInitialPreferencesAsync(initialPreferences, initialDataFile)
       .then((id) => {
         if (!cancelled) setTaskId(id);
       })
@@ -59,7 +60,7 @@ export function ResultsScreen({ initialPreferences, onBack }: ResultsScreenProps
     return () => {
       cancelled = true;
     };
-  }, [initialPreferences, taskId]);
+  }, [initialPreferences, initialDataFile, taskId]);
 
   // Poll when we have a taskId
   useEffect(() => {

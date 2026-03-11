@@ -12,6 +12,7 @@ from starlette.requests import Request
 
 from shared.data_loader import DataLoader
 from shared.recommendation_engine import RecommendationEngine
+from api.config import Config
 from api.routes import recommendations, tasks, extract
 
 # Configure logging
@@ -27,7 +28,8 @@ async def lifespan(app: FastAPI):
     """Lifespan context manager for startup/shutdown."""
     # Startup: Load data
     try:
-        loader = DataLoader()
+        config = Config()
+        loader = DataLoader(config.DATA_FILE_PATH)
         inventory = loader.load()
         recommendation_engine = RecommendationEngine(inventory)
 

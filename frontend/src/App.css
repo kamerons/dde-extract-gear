@@ -61,6 +61,15 @@
   font-size: 0.95rem;
 }
 
+.configuration-data-file-select {
+  font-size: 1rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  min-width: 12rem;
+  background: #fff;
+}
+
 /* Stat categories */
 .stat-categories {
   display: grid;

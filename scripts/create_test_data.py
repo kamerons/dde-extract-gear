@@ -14,7 +14,7 @@ from shared.armor_constants import ARMOR_TYPES, SET_TYPES
 
 
 def create_test_collected_json(
-    output_path: str = "data/collected.json",
+    output_path: str = "data/collected/sample.json",
     num_pieces: int = 1000,
     seed: int = None
 ):

@@ -479,13 +479,36 @@ def _clear_current_task(redis_client: redis.Redis, current_key: str) -> None:
         logger.warning("Failed to clear current task key: %s", e)
 
 
+def _recommendation_data_file(config: Config, task_data: Dict[str, Any]) -> str:
+    """Resolve data file path for recommendation task; must be under data/collected/."""
+    raw = task_data.get("data_file")
+    if not raw or not str(raw).strip():
+        return config.DATA_FILE_PATH
+    raw = str(raw).strip()
+    if ".." in raw or raw.startswith("/") or (len(raw) > 1 and raw[1] == ":"):
+        logger.warning("Rejected data_file path (security): %s", raw)
+        return config.DATA_FILE_PATH
+    if not raw.startswith("data/collected/"):
+        return config.DATA_FILE_PATH
+    repo_root = Path(__file__).resolve().parent.parent
+    resolved = (repo_root / raw).resolve()
+    allowed_dir = (repo_root / "data" / "collected").resolve()
+    try:
+        resolved.relative_to(allowed_dir)
+    except ValueError:
+        logger.warning("Rejected data_file path (outside data/collected): %s", raw)
+        return config.DATA_FILE_PATH
+    return raw
+
+
 def run_recommendation(redis_client: redis.Redis, config: Config, task_data: Dict[str, Any]) -> int:
     """Run one recommendation task. Returns exit code 0 or 1."""
     task_id = task_data["task_id"]
     weights = json.loads(task_data["weights"])
     constraints = json.loads(task_data["constraints"])
     limit = int(task_data["limit"])
-    logger.info("Processing task %s", task_id)
+    data_file = _recommendation_data_file(config, task_data)
+    logger.info("Processing task %s (data_file=%s)", task_id, data_file)
     redis_client.setex(CURRENT_TASK_KEY, CURRENT_TASK_EXPIRY, task_id)
     update_task_status(redis_client, task_id, "processing")
 
@@ -499,7 +522,7 @@ def run_recommendation(redis_client: redis.Redis, config: Config, task_data: Dic
     def check_cancelled() -> bool:
         return redis_client.get(f"task:{task_id}:cancelled") == "1"
 
-    processor = RecommendationProcessor(config.DATA_FILE_PATH)
+    processor = RecommendationProcessor(data_file)
     try:
         results = processor.process(
             weights=weights,

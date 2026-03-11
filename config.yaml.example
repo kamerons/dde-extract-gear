@@ -7,10 +7,6 @@ redis:
   db: 0
   # password: null  # optional; can override via REDIS_PASSWORD env
 
-data:
-  file_path: data/collected.json
-  dir: data
-
 api:
   host: 0.0.0.0
   port: 8000

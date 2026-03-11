@@ -24,6 +24,19 @@ export interface TaskResponse {
 // In production (Docker), this should be set to the API service URL
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
+/**
+ * Fetch list of JSON filenames in data/collected/ for the data-file dropdown.
+ */
+export async function getDataFiles(): Promise<string[]> {
+  const response = await fetch(`${API_BASE_URL}/api/data-files`);
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Failed to fetch data files: ${response.status} ${text}`);
+  }
+  const data: { files: string[] } = await response.json();
+  return data.files ?? [];
+}
+
 function convertPreferencesToRequest(preferences: BuildPreferences): {
   weights: Record<string, number>;
   constraints: { min: Record<string, number> };
@@ -85,9 +98,11 @@ export async function submitInitialPreferences(
 /**
  * Submit initial build preferences to the server (async version).
  * Returns a task_id that can be polled for results.
+ * @param dataFile - Optional filename from data/collected/ (e.g. "sample.json")
  */
 export async function submitInitialPreferencesAsync(
-  preferences: BuildPreferences
+  preferences: BuildPreferences,
+  dataFile?: string
 ): Promise<string> {
   const requestBody = convertPreferencesToRequest(preferences);
 
@@ -99,6 +114,7 @@ export async function submitInitialPreferencesAsync(
     body: JSON.stringify({
       ...requestBody,
       limit: 10,
+      ...(dataFile ? { data_file: dataFile } : {}),
     }),
   });
 
@@ -138,9 +154,10 @@ export const POLL_INTERVAL_MS = 1500;
  */
 export async function submitInitialPreferencesWithPolling(
   preferences: BuildPreferences,
-  onProgress?: (status: TaskResponse) => void
+  onProgress?: (status: TaskResponse) => void,
+  dataFile?: string
 ): Promise<RecommendationResponse> {
-  const taskId = await submitInitialPreferencesAsync(preferences);
+  const taskId = await submitInitialPreferencesAsync(preferences, dataFile);
 
   for (;;) {
     const status = await getTaskStatus(taskId);

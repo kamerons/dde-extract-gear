@@ -46,6 +46,7 @@ class RecommendationRequest(BaseModel):
     weights: Dict[str, float] = Field(default_factory=dict)
     constraints: Constraints = Field(default_factory=Constraints)
     limit: int = Field(default=10, ge=1, le=100)
+    data_file: Optional[str] = None
 
     @field_validator('weights')
     @classmethod

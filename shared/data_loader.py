@@ -11,7 +11,7 @@ from shared.models import ArmorPiece
 class DataLoader:
     """Loads and validates armor data from JSON file."""
 
-    def __init__(self, data_file: str = "data/collected.json"):
+    def __init__(self, data_file: str = "data/collected/sample.json"):
         """
         Initialize data loader.
 

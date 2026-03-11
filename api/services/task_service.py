@@ -39,7 +39,8 @@ class TaskService:
         self,
         weights: Dict[str, float],
         constraints: Dict[str, int],
-        limit: int = 10
+        limit: int = 10,
+        data_file: Optional[str] = None,
     ) -> str:
         """
         Create a new recommendation task. Cancels any currently running task and
@@ -49,6 +50,7 @@ class TaskService:
             weights: Dictionary mapping stat names to weights
             constraints: Dictionary mapping stat names to minimum values
             limit: Maximum number of recommendations to return
+            data_file: Optional path to JSON file under data/collected/ (e.g. data/collected/sample.json)
 
         Returns:
             Task ID (UUID string)
@@ -83,12 +85,14 @@ class TaskService:
         self.redis_client.expire(meta_key, self.TASK_EXPIRY_SECONDS)
 
         # Add only this task to the queue
-        task_data = {
+        task_data: Dict[str, Any] = {
             "task_id": task_id,
             "weights": json.dumps(weights),
             "constraints": json.dumps(constraints),
             "limit": limit,
         }
+        if data_file is not None:
+            task_data["data_file"] = data_file
         self.redis_client.rpush(self.QUEUE_KEY, json.dumps(task_data))
 
         logger.info(f"Created task {task_id}")

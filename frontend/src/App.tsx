@@ -13,16 +13,19 @@ function App() {
   const [currentView, setCurrentView] = useState<View>('configuration');
   const [activeTab, setActiveTab] = useState<Tab>('training');
   const [pendingPreferences, setPendingPreferences] = useState<BuildPreferences | null>(null);
+  const [pendingDataFile, setPendingDataFile] = useState<string | undefined>(undefined);
   const [configError, setConfigError] = useState<string | null>(null);
 
-  const handleNavigateToResults = (preferences: BuildPreferences) => {
+  const handleNavigateToResults = (preferences: BuildPreferences, dataFile?: string) => {
     setConfigError(null);
     setPendingPreferences(preferences);
+    setPendingDataFile(dataFile);
     setCurrentView('results');
   };
 
   const handleBackToConfiguration = () => {
     setPendingPreferences(null);
+    setPendingDataFile(undefined);
     setCurrentView('configuration');
   };
 
@@ -30,6 +33,7 @@ function App() {
     return (
       <ResultsScreen
         initialPreferences={pendingPreferences}
+        initialDataFile={pendingDataFile}
         onBack={handleBackToConfiguration}
       />
     );
