@@ -854,6 +854,20 @@
   color: #666;
 }
 
+.extract-verification-nav .extract-verification-jump {
+  padding: 0.5rem 0.75rem;
+  font-size: 0.95rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: #fff;
+  min-width: 12rem;
+}
+
+.extract-verification-nav .extract-verification-jump:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .extract-verification-layout {
   display: grid;
   grid-template-columns: 1fr minmax(280px, 400px);

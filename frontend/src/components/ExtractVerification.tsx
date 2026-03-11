@@ -164,6 +164,19 @@ export function ExtractVerification() {
             <span className="extract-verification-counter">
               {currentIndex + 1} / {items.length}
             </span>
+            <select
+              className="extract-verification-jump"
+              value={currentIndex}
+              onChange={(e) => setCurrentIndex(Number(e.target.value))}
+              disabled={loading}
+              aria-label="Jump to image"
+            >
+              {items.map((item, i) => (
+                <option key={`${item.subdir}-${item.filename}`} value={i}>
+                  {item.subdir.split('/').pop()} / {item.filename}
+                </option>
+              ))}
+            </select>
             <button
               type="button"
               onClick={goNext}
