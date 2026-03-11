@@ -178,8 +178,12 @@ export function ExtractVerification() {
               {currentItem && (
                 <>
                   <img
-                    src={getScreenshotUrl(currentItem.filename, currentItem.subdir, { crop: true })}
-                    alt={`Screenshot ${currentItem.filename}`}
+                    src={
+                      result?.debug?.region_card
+                        ? dataUrlFromBase64(result.debug.region_card)
+                        : getScreenshotUrl(currentItem.filename, currentItem.subdir, { crop: true })
+                    }
+                    alt="Card crop"
                     className="extract-verification-image"
                   />
                   <p className="extract-verification-caption">
@@ -319,10 +323,11 @@ export function ExtractVerification() {
                       </div>
                       {(result.debug.ocr_set !== undefined ||
                         result.debug.ocr_level !== undefined ||
+                        result.debug.level_via_digit !== undefined ||
                         result.debug.ocr_set_error ||
                         result.debug.ocr_level_error) && (
                         <>
-                          <h3 className="extract-verification-debug-heading">OCR output</h3>
+                          <h3 className="extract-verification-debug-heading">Set (OCR) &amp; Level</h3>
                           <div className="extract-verification-debug-ocr">
                             {result.debug.ocr_set_error && (
                               <p className="extract-verification-debug-ocr-line extract-verification-debug-ocr-error" role="alert">
@@ -332,10 +337,29 @@ export function ExtractVerification() {
                             )}
                             {result.debug.ocr_set !== undefined && (
                               <p className="extract-verification-debug-ocr-line">
-                                <span className="extract-verification-debug-ocr-label">Set:</span>{' '}
+                                <span className="extract-verification-debug-ocr-label">Set (OCR):</span>{' '}
                                 <code className="extract-verification-debug-ocr-value">
                                   {result.debug.ocr_set === '' ? '(empty)' : result.debug.ocr_set}
                                 </code>
+                              </p>
+                            )}
+                            {result.debug.level_via_digit !== undefined && (
+                              <p className="extract-verification-debug-ocr-line">
+                                <span className="extract-verification-debug-ocr-label">Level:</span>{' '}
+                                {result.debug.level_via_digit
+                                  ? 'from digit detector (clusters + model)'
+                                  : 'from OCR fallback'}
+                              </p>
+                            )}
+                            {(result.debug.level_via_digit !== undefined ||
+                              result.debug.ocr_level !== undefined) && (
+                              <p className="extract-verification-debug-ocr-line">
+                                <span className="extract-verification-debug-ocr-label">Parsed level:</span>{' '}
+                                {result.current_level != null && result.max_level != null
+                                  ? `${result.current_level} / ${result.max_level}`
+                                  : result.current_level != null
+                                    ? String(result.current_level)
+                                    : '(none)'}
                               </p>
                             )}
                             {result.debug.ocr_level_error && (
@@ -344,9 +368,9 @@ export function ExtractVerification() {
                                 {result.debug.ocr_level_error}
                               </p>
                             )}
-                            {result.debug.ocr_level !== undefined && (
+                            {result.debug.ocr_level !== undefined && !result.debug.level_via_digit && (
                               <p className="extract-verification-debug-ocr-line">
-                                <span className="extract-verification-debug-ocr-label">Level:</span>{' '}
+                                <span className="extract-verification-debug-ocr-label">Level OCR text:</span>{' '}
                                 <code className="extract-verification-debug-ocr-value">
                                   {result.debug.ocr_level === '' ? '(empty)' : result.debug.ocr_level}
                                 </code>

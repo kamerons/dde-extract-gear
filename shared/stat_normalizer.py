@@ -40,6 +40,7 @@ class StatNormalizer:
         'hero_hp': HERO_TOWER_RANGE,
         'hero_dmg': HERO_TOWER_RANGE,
         'hero_rate': HERO_TOWER_RANGE,
+        'hero_speed': SPEED_RANGE,
         'offense': HERO_TOWER_RANGE,
         'defense': HERO_TOWER_RANGE,
 
@@ -49,8 +50,7 @@ class StatNormalizer:
         'tower_rate': HERO_TOWER_RANGE,
         'tower_range': HERO_TOWER_RANGE,
 
-        # Hero speed - by itself
-        'hero_speed': SPEED_RANGE,
+
     }
 
     @lru_cache(maxsize=100000)

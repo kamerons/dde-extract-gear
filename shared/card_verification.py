@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 from shared.armor_sets import SET_TYPES
 from shared.extract_regions import compute_boxes
+from shared.level_digit_extract import extract_level_clusters
 from shared.stat_normalizer import StatNormalizer
 
 # Input size for icon and digit models (matches training)
@@ -91,6 +92,7 @@ def verify_card(
 
     img = _load_image(image)
     if img is None:
+        logger.warning("verify_card: failed to load image")
         return VerificationResult(
             armor_set=None,
             current_level=None,
@@ -99,15 +101,18 @@ def verify_card(
             error="Failed to load image",
             debug=None,
         )
+    logger.debug("verify_card: image loaded shape=%s", img.shape)
 
     boxes = compute_boxes(origin_x, origin_y, scale, image_type)
     by_type: dict[str, list[dict]] = {}
     for b in boxes:
         by_type.setdefault(b["type"], []).append(b)
 
+    card_boxes = by_type.get("card", [])
     stat_boxes = by_type.get("stat", [])
     set_boxes = by_type.get("set", [])
     level_boxes = by_type.get("level", [])
+    logger.debug("verify_card: boxes card=%s stat=%s set=%s level=%s", len(card_boxes), len(stat_boxes), len(set_boxes), len(level_boxes))
 
     # Crops for debug (computed when return_debug regardless of model success)
     set_crop: np.ndarray | None = None
@@ -167,21 +172,37 @@ def verify_card(
             if set_crop is not None and set_crop.size > 0:
                 set_crop_processed = _preprocess_set_image(set_crop)
 
-    # Level (merge, legacy cyan-based preprocessing, then OCR. Expected format "1 / 16".)
+    # Level (digit detector first, then OCR fallback. Expected format "X / Y".)
     ocr_level_text = ""
     ocr_level_error = ""
+    level_via_digit = False
     level_processed: np.ndarray | None = None
     if level_boxes:
         level_merged = _merge_level_crops(img, level_boxes)
         if level_merged is not None:
+            logger.debug("verify_card: level_merged shape=%s", level_merged.shape)
             level_processed = _preprocess_level_image(level_merged)
-            current_level, max_level, ocr_level_text, ocr_level_error = _read_level_from_merged(level_merged)
+            current_level, max_level, ocr_level_text, ocr_level_error, level_via_digit = _read_level_from_merged(
+                level_merged,
+                digit_model_path=digit_model_path,
+                data_dir=data_dir,
+            )
+            logger.info(
+                "verify_card: level result current=%s max=%s via_digit=%s ocr_error=%s",
+                current_level, max_level, level_via_digit, ocr_level_error or "(none)",
+            )
+        else:
+            logger.warning("verify_card: level_merged is None (no level crops)")
     if current_level is None and level_boxes:
         errors.append("Could not read level")
 
     debug: dict[str, Any] | None = None
     if return_debug:
         debug = {}
+        if card_boxes:
+            card_crop = _crop_box(img, card_boxes[0])
+            if card_crop is not None and card_crop.size > 0:
+                debug["region_card"] = _encode_image_b64(card_crop)
         if set_crop is not None and set_crop.size > 0:
             debug["region_set"] = _encode_image_b64(set_crop)
         if set_crop_processed is not None:
@@ -193,6 +214,7 @@ def verify_card(
             debug["region_level"] = _encode_image_b64(level_merged)
             if level_processed is not None:
                 debug["preprocess_level"] = _encode_image_b64(level_processed)
+        debug["level_via_digit"] = level_via_digit
         debug["ocr_level"] = ocr_level_text
         if ocr_level_error:
             debug["ocr_level_error"] = ocr_level_error
@@ -450,24 +472,129 @@ def _preprocess_level_image(img: np.ndarray) -> np.ndarray:
     return out
 
 
-def _read_level_from_merged(merged: np.ndarray) -> tuple[int | None, int | None, str, str]:
+def _interpret_level_digits(digits: list[int]) -> tuple[int | None, int | None]:
     """
-    Extract level from merged level image. Uses legacy cyan-based binarization
-    (PreProcessLevel: cyan -> black, rest -> white). Expected format: "1 / 16" (current / max).
-    Returns (current_level, max_level, raw_ocr_text, ocr_error).
+    Map digit model outputs (0-9 or 10 for slash) to (current_level, max_level).
+    Expects 3, 4, or 5 values with slash in the middle. Validates 1 <= max_level <= 16 and current_level <= max_level.
+    Returns (None, None) if invalid.
     """
-    processed = _preprocess_level_image(merged)
+    n = len(digits)
+    if n == 3:
+        x_val = digits[0] if digits[0] <= 9 else None
+        y_val = digits[2] if digits[2] <= 9 else None
+        if x_val is None or y_val is None:
+            return None, None
+        current_level, max_level = x_val, y_val
+    elif n == 4:
+        if digits[0] > 9 or digits[2] > 9 or digits[3] > 9:
+            return None, None
+        current_level = digits[0]
+        max_level = 10 * digits[2] + digits[3]
+    elif n == 5:
+        if any(d > 9 for d in [digits[0], digits[1], digits[3], digits[4]]):
+            return None, None
+        current_level = 10 * digits[0] + digits[1]
+        max_level = 10 * digits[3] + digits[4]
+    else:
+        return None, None
+    if not (1 <= max_level <= 16 and current_level is not None and current_level <= max_level):
+        return None, None
+    return current_level, max_level
+
+
+def _level_cluster_to_model_input(crop: np.ndarray) -> np.ndarray:
+    """
+    Resize a level cluster crop to STAT_INPUT_H x STAT_INPUT_W for the digit model.
+    Letterbox: preserve aspect ratio and center on white background so the digit is not
+    stretched (model was trained on stat digits with consistent aspect).
+    Returns float array (56, 56, 3) in [0, 1].
+    """
+    from PIL import Image
+    h, w = crop.shape[0], crop.shape[1]
+    if h <= 0 or w <= 0:
+        out = np.ones((STAT_INPUT_H, STAT_INPUT_W, 3), dtype=np.float32)
+        return out / 255.0
+    scale = min(STAT_INPUT_H / h, STAT_INPUT_W / w)
+    new_w = max(1, int(w * scale))
+    new_h = max(1, int(h * scale))
+    pil = Image.fromarray(crop).resize((new_w, new_h), Image.Resampling.NEAREST)
+    out = np.ones((STAT_INPUT_H, STAT_INPUT_W, 3), dtype=np.uint8) * 255
+    y0 = (STAT_INPUT_H - new_h) // 2
+    x0 = (STAT_INPUT_W - new_w) // 2
+    resized = np.array(pil)
+    if resized.ndim == 2:
+        resized = np.stack([resized, resized, resized], axis=-1)
+    out[y0 : y0 + new_h, x0 : x0 + new_w] = resized
+    return out.astype(np.float32) / 255.0
+
+
+def _read_level_via_digit(
+    processed: np.ndarray,
+    *,
+    digit_model_path: Path | None = None,
+    data_dir: Path | None = None,
+) -> tuple[int | None, int | None]:
+    """
+    Parse level from binarized level image using digit detector. Expects format X / Y
+    with 3, 4, or 5 clusters (slash in middle). Returns (current_level, max_level) or (None, None).
+    """
+    clusters = extract_level_clusters(processed)
+    n_clusters = len(clusters)
+    logger.debug("_read_level_via_digit: cluster count=%s", n_clusters)
+    if n_clusters not in (3, 4, 5):
+        logger.debug("_read_level_via_digit: skipping digit path (cluster count not 3/4/5)")
+        return None, None
+    if data_dir is None:
+        data_dir = Path(__file__).resolve().parent.parent / "data"
+    digit_path = digit_model_path if digit_model_path is not None else _resolve_digit_model_path(Path(data_dir))
+    if digit_path is None or not Path(digit_path).exists():
+        logger.debug("_read_level_via_digit: no digit model at %s", digit_path)
+        return None, None
+    logger.debug("_read_level_via_digit: loading model from %s", digit_path)
+    model = _load_keras_model(Path(digit_path))
+    if model is None:
+        logger.warning("_read_level_via_digit: failed to load keras model")
+        return None, None
+    from PIL import Image
+    X_list = []
+    for crop in clusters:
+        if crop.ndim == 2:
+            crop = np.stack([crop, crop, crop], axis=-1)
+        arr = _level_cluster_to_model_input(crop)
+        X_list.append(arr)
+    X = np.stack(X_list)
+    preds = model.predict(X, verbose=0)
+    indices = np.argmax(preds, axis=-1)
+    digits = [int(idx) for idx in indices]
+    logger.debug("_read_level_via_digit: model predictions (0-9=digit 10=slash) %s", digits)
+    out = _interpret_level_digits(digits)
+    logger.debug("_read_level_via_digit: interpreted %s -> %s", digits, out)
+    return out
+
+
+# Minimum height (px) for level image before OCR; tesseract works poorly on very small text.
+_LEVEL_OCR_MIN_HEIGHT = 90
+
+
+def _read_level_ocr(merged: np.ndarray, processed: np.ndarray) -> tuple[int | None, int | None, str, str]:
+    """OCR fallback for level. Returns (current_level, max_level, raw_ocr_text, ocr_error)."""
     try:
         import pytesseract
         from PIL import Image
         pil = Image.fromarray(processed)
-        text = pytesseract.image_to_string(pil).strip()
+        h, w = processed.shape[:2]
+        if h < _LEVEL_OCR_MIN_HEIGHT:
+            scale = _LEVEL_OCR_MIN_HEIGHT / h
+            new_w = max(1, int(w * scale))
+            new_h = max(1, int(h * scale))
+            logger.debug("_read_level_ocr: upscaling level image %sx%s -> %sx%s for tesseract", h, w, new_h, new_w)
+            pil = pil.resize((new_w, new_h), Image.Resampling.NEAREST)
+        text = pytesseract.image_to_string(pil, config="--psm 7").strip()
     except ImportError:
         return None, None, "", "pytesseract or PIL not installed"
     except Exception as e:
         logger.exception("OCR failed for level crop")
         return None, None, "", str(e)
-    # Parse "X/Y" or "X / Y" or two numbers
     match = re.search(r"(\d+)\s*/\s*(\d+)", text)
     if match:
         return int(match.group(1)), int(match.group(2)), text, ""
@@ -477,3 +604,30 @@ def _read_level_from_merged(merged: np.ndarray) -> tuple[int | None, int | None,
     if len(nums) == 1:
         return int(nums[0]), None, text, ""
     return None, None, text, ""
+
+
+def _read_level_from_merged(
+    merged: np.ndarray,
+    *,
+    digit_model_path: Path | None = None,
+    data_dir: Path | None = None,
+) -> tuple[int | None, int | None, str, str, bool]:
+    """
+    Extract level from merged level image. Tries digit detector first (clusters + model);
+    falls back to OCR. Expected format: "X / Y" (current / max).
+    Returns (current_level, max_level, raw_ocr_text, ocr_error, level_via_digit).
+    """
+    processed = _preprocess_level_image(merged)
+    current_level, max_level = _read_level_via_digit(
+        processed,
+        digit_model_path=digit_model_path,
+        data_dir=data_dir,
+    )
+    if current_level is not None and max_level is not None:
+        logger.debug("_read_level_from_merged: digit path succeeded %s / %s", current_level, max_level)
+        return current_level, max_level, "", "", True
+    logger.debug("_read_level_from_merged: falling back to OCR")
+    cl, ml, text, err = _read_level_ocr(merged, processed)
+    if err:
+        logger.debug("_read_level_from_merged: OCR error=%s", err)
+    return cl, ml, text, err, False

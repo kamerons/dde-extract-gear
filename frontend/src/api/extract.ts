@@ -186,21 +186,25 @@ export interface VerificationStartResponse {
   status: string;
 }
 
-/** Debug images (base64 PNG) and OCR text returned when verification includes debug payload. */
+/** Debug images (base64 PNG) and OCR/digit text returned when verification includes debug payload. */
 export interface VerificationDebug {
+  /** Card region crop (base64 PNG); use as preview image. */
+  region_card?: string;
   region_set?: string;
   region_level?: string;
   region_stat_crops?: string[];
   preprocess_set?: string;
   preprocess_level?: string;
   preprocess_stat_crops?: string[];
+  /** True when level was read via digit detector (clusters + model); false when OCR fallback was used. */
+  level_via_digit?: boolean;
   /** Raw text returned by OCR for the set (armor set) region. */
   ocr_set?: string;
-  /** Raw text returned by OCR for the level region (expected format: "1 / 16"). */
+  /** Raw text from OCR for the level region (only set when level used OCR fallback). */
   ocr_level?: string;
   /** Error message if OCR failed for the set region (e.g. tesseract not found). */
   ocr_set_error?: string;
-  /** Error message if OCR failed for the level region. */
+  /** Error message if OCR failed for the level region (when using OCR fallback). */
   ocr_level_error?: string;
 }
 

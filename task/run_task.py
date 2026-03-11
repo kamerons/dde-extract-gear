@@ -311,17 +311,21 @@ def run_verification(redis_client: redis.Redis, config: Config, task_data: Dict[
     )
     repo_root = Path(__file__).resolve().parent.parent
     data_dir = (repo_root / config.DATA_DIR).resolve()
+    logger.debug("Verification data_dir=%s", data_dir)
     image_path = (data_dir / subdir / filename).resolve()
     try:
         image_path.relative_to(data_dir)
     except ValueError:
+        logger.warning("Invalid filename or subdir: %s / %s", subdir, filename)
         update_task_status(redis_client, task_id, "failed", error="Invalid filename or subdir")
         return 1
     if not image_path.exists():
+        logger.warning("Screenshot not found: %s", image_path)
         update_task_status(redis_client, task_id, "failed", error="Screenshot not found")
         return 1
     txt_path = image_path.with_suffix(".txt")
     if not txt_path.exists():
+        logger.warning("No saved origin for %s", filename)
         update_task_status(redis_client, task_id, "failed", error="No saved origin for this screenshot")
         return 1
     try:
@@ -333,6 +337,7 @@ def run_verification(redis_client: redis.Redis, config: Config, task_data: Dict[
         origin_x = int(parts[0])
         origin_y = int(parts[1])
     except (OSError, ValueError) as e:
+        logger.warning("Failed to read origin %s: %s", txt_path, e)
         update_task_status(redis_client, task_id, "failed", error=f"Failed to read origin: {e}")
         return 1
     image_type = "blueprint" if "blueprint" in subdir else "regular"
@@ -341,7 +346,9 @@ def run_verification(redis_client: redis.Redis, config: Config, task_data: Dict[
         if image_type == "blueprint"
         else config.EXTRACT_REGULAR_SCALE
     )
+    logger.info("Verification: origin=(%s, %s), scale=%s, image_type=%s", origin_x, origin_y, scale, image_type)
     try:
+        logger.debug("Calling verify_card(%s, ...)", image_path)
         result = verify_card(
             str(image_path),
             origin_x,
@@ -350,6 +357,13 @@ def run_verification(redis_client: redis.Redis, config: Config, task_data: Dict[
             image_type,
             data_dir=data_dir,
             return_debug=True,
+        )
+        logger.info(
+            "Verification result: armor_set=%s, level=%s/%s, error=%s",
+            result.armor_set,
+            result.current_level,
+            result.max_level,
+            result.error,
         )
         results = {
             "armor_set": result.armor_set,
