@@ -105,7 +105,26 @@ export function ResultsScreen({
   const [formulaConstants, setFormulaConstants] = useState<FormulaConstants | null>(null);
   const [localWeights, setLocalWeights] = useState<Record<string, number>>({});
   const [isRecalculating, setIsRecalculating] = useState(false);
+  const [compareSelection, setCompareSelection] = useState<[string | null, string | null]>([null, null]);
   const stoppedRef = useRef(false);
+  const comparisonPanelRef = useRef<HTMLDivElement>(null);
+
+  const handleCompareWith = (setId: string) => {
+    setCompareSelection((prev) => {
+      if (prev[0] === setId) return [null, prev[1]];
+      if (prev[1] === setId) return [prev[0], null];
+      if (prev[0] == null) return [setId, null];
+      if (prev[1] == null) return [prev[0], setId];
+      return [prev[0], setId];
+    });
+  };
+
+  // When user selects the second piece for comparison, scroll the comparison panel into view
+  useEffect(() => {
+    if (compareSelection[1] != null) {
+      comparisonPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [compareSelection[1]]);
 
   const initialRequestParams = useMemo(() => {
     if (!initialPreferences) return null;
@@ -250,6 +269,28 @@ export function ResultsScreen({
       .sort((a, b) => b.score - a.score);
   }, [recommendations, weightsUsed, localWeights]);
 
+  const weightsDiffer =
+    weightsUsed != null &&
+    Object.keys(localWeights).length > 0 &&
+    (Object.keys(weightsUsed).length !== Object.keys(localWeights).length ||
+      !Object.keys(weightsUsed).every(
+        (k) => (weightsUsed[k] ?? 0) === (localWeights[k] ?? 0)
+      ));
+
+  const originalRankBySetId = useMemo(() => {
+    if (!weightsDiffer || recommendations.length === 0) return new Map<string, number>();
+    const sorted = [...recommendations].sort((a, b) => b.score - a.score);
+    const map = new Map<string, number>();
+    sorted.forEach((r, i) => map.set(r.set_id, i + 1));
+    return map;
+  }, [recommendations, weightsDiffer]);
+
+  const recommendationsById = useMemo(() => {
+    const map = new Map<string, Recommendation>();
+    recommendations.forEach((r) => map.set(r.set_id, r));
+    return map;
+  }, [recommendations]);
+
   const progressPercent =
     progress && progress.total_planned > 0
       ? Math.round((100 * progress.evaluated) / progress.total_planned)
@@ -276,6 +317,8 @@ export function ResultsScreen({
 
   const handleRecalculate = () => {
     if (!initialRequestParams || isRecalculating) return;
+    stoppedRef.current = true;
+    setError(null);
     setIsRecalculating(true);
     submitTaskWithWeights(
       localWeights,
@@ -333,12 +376,59 @@ export function ResultsScreen({
       {recommendations.length > 0 && (
         <div className="results-two-pane">
           <div className="results-left-pane">
+            {compareSelection[0] != null && compareSelection[1] != null && (
+              <div className="comparison-panel" ref={comparisonPanelRef}>
+                <div className="comparison-panel-header">
+                  <h3>Comparing armor sets</h3>
+                  <button
+                    type="button"
+                    className="comparison-clear-button"
+                    onClick={() => setCompareSelection([null, null])}
+                  >
+                    Clear comparison
+                  </button>
+                </div>
+                <div className="comparison-cards">
+                  {[compareSelection[0], compareSelection[1]].map((setId) => {
+                    const rec = displayRecommendations.find((r) => r.set_id === setId);
+                    const rank = rec ? displayRecommendations.indexOf(rec) + 1 : 0;
+                    return rec ? (
+                      <div key={setId} className="comparison-card-slot">
+                        <RecommendationCard
+                          recommendation={rec}
+                          rank={rank}
+                          onCompareWith={() => handleCompareWith(setId)}
+                          isCompareSelected={true}
+                          originalScore={
+                            weightsDiffer ? recommendationsById.get(rec.set_id)?.score : undefined
+                          }
+                          originalRank={
+                            weightsDiffer ? originalRankBySetId.get(rec.set_id) : undefined
+                          }
+                        />
+                      </div>
+                    ) : null;
+                  })}
+                </div>
+              </div>
+            )}
             <div className="recommendations-grid">
               {displayRecommendations.map((recommendation, index) => (
                 <RecommendationCard
                   key={recommendation.set_id}
                   recommendation={recommendation}
                   rank={index + 1}
+                  onCompareWith={() => handleCompareWith(recommendation.set_id)}
+                  isCompareSelected={
+                    recommendation.set_id === compareSelection[0] ||
+                    recommendation.set_id === compareSelection[1]
+                  }
+                  originalScore={
+                    weightsDiffer ? recommendationsById.get(recommendation.set_id)?.score : undefined
+                  }
+                  originalRank={
+                    weightsDiffer ? originalRankBySetId.get(recommendation.set_id) : undefined
+                  }
                 />
               ))}
             </div>
@@ -397,7 +487,7 @@ export function ResultsScreen({
               <button
                 type="button"
                 onClick={handleRecalculate}
-                disabled={!initialRequestParams || isRecalculating || isProcessing}
+                disabled={!initialRequestParams || isRecalculating}
                 className="recalculate-button"
               >
                 {isRecalculating ? 'Starting…' : 'Recalculate'}

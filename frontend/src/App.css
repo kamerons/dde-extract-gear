@@ -264,9 +264,9 @@
 
 /* Results Screen */
 .results-container {
-  max-width: 1400px;
-  margin: 0 auto;
-  padding: 2rem;
+  max-width: 100%;
+  margin: 0 1rem;
+  padding: 0.75rem;
   min-height: 100vh;
   position: relative;
   display: flex;
@@ -475,6 +475,53 @@
   outline-offset: 2px;
 }
 
+/* Comparison panel */
+.comparison-panel {
+  margin-bottom: 2rem;
+  padding: 1rem;
+  background: #f8f9fa;
+  border: 1px solid #e0e0e0;
+  border-radius: 12px;
+}
+
+.comparison-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.comparison-panel-header h3 {
+  margin: 0;
+  font-size: 1.1rem;
+  color: #333;
+}
+
+.comparison-clear-button {
+  padding: 0.4rem 0.75rem;
+  font-size: 0.875rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+  font: inherit;
+}
+
+.comparison-clear-button:hover {
+  background: #f0f0f0;
+}
+
+.comparison-cards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+}
+
+.comparison-card-slot {
+  min-width: 0;
+}
+
 /* Recommendations Grid (single column in left pane) */
 .recommendations-grid {
   display: grid;
@@ -493,6 +540,7 @@
   transition:
     transform 0.2s,
     box-shadow 0.2s;
+  max-width: 42rem;
 }
 
 .recommendation-card:hover {
@@ -574,6 +622,54 @@
   color: #2196f3;
 }
 
+.score-value-row {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.score-delta {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.score-delta.improved {
+  color: #2e7d32;
+}
+
+.score-delta.worse {
+  color: #c62828;
+}
+
+.compare-with-button {
+  flex-shrink: 0;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.875rem;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  background: #fafafa;
+  cursor: pointer;
+  font: inherit;
+}
+
+.compare-with-button:hover {
+  background: #eee;
+  border-color: #ccc;
+}
+
+.compare-with-button.compare-with-selected,
+.compare-with-button[aria-pressed="true"] {
+  background: var(--color-accent);
+  color: white;
+  border-color: var(--color-accent);
+}
+
+.compare-with-button:focus-visible {
+  outline: 2px solid #2196f3;
+  outline-offset: 2px;
+}
+
 /* Recommendation Card Body */
 .recommendation-card-body {
   display: flex;
@@ -618,6 +714,44 @@
 .score-breakdown-item .score-value {
   font-size: 1rem;
   font-weight: 600;
+}
+
+/* Armor Pieces collapsible */
+.recommendation-pieces-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0;
+  margin: 0 0 0.75rem 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  color: #333;
+}
+
+.recommendation-pieces-toggle:hover {
+  color: #1a1a1a;
+}
+
+.recommendation-pieces-toggle:focus-visible {
+  outline: 2px solid #2196f3;
+  outline-offset: 2px;
+}
+
+.recommendation-pieces-toggle-icon {
+  font-size: 0.75rem;
+  color: #666;
+}
+
+.recommendation-pieces-toggle h3 {
+  font-size: 1.2rem;
+  margin: 0;
+  border: none;
+  padding: 0;
+  border-bottom: none;
 }
 
 /* Pieces List */
@@ -752,10 +886,10 @@
   font-size: 0.9rem;
 }
 
-/* Stats Container */
+/* Stats Container (2x2 for four stat categories) */
 .stats-container {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: repeat(2, 1fr);
   gap: 1.5rem;
 }
 

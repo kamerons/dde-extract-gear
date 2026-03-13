@@ -7,6 +7,10 @@ import type { StatType } from '../types';
 interface RecommendationCardProps {
   recommendation: Recommendation;
   rank: number;
+  onCompareWith?: () => void;
+  isCompareSelected?: boolean;
+  originalScore?: number;
+  originalRank?: number;
 }
 
 function formatScore(score: number): string {
@@ -33,8 +37,16 @@ function PieceLocation({ piece }: { piece: RecommendationPiece }) {
   );
 }
 
-export function RecommendationCard({ recommendation, rank }: RecommendationCardProps) {
+export function RecommendationCard({
+  recommendation,
+  rank,
+  onCompareWith,
+  isCompareSelected,
+  originalScore,
+  originalRank,
+}: RecommendationCardProps) {
   const [expandedPieceIndex, setExpandedPieceIndex] = useState<number | null>(null);
+  const [armorPiecesExpanded, setArmorPiecesExpanded] = useState(false);
   const armorSetName = recommendation.pieces[0]?.armor_set || recommendation.set_id;
 
   const statsByCategory: Record<string, Array<[string, number]>> = {};
@@ -61,11 +73,50 @@ export function RecommendationCard({ recommendation, rank }: RecommendationCardP
           <h2>{armorSetName}</h2>
           <p className="recommendation-set-id">Set ID: {recommendation.set_id}</p>
         </div>
+        {onCompareWith != null && (
+          <button
+            type="button"
+            className={`compare-with-button ${isCompareSelected ? 'compare-with-selected' : ''}`}
+            onClick={onCompareWith}
+            aria-pressed={isCompareSelected}
+          >
+            Compare with
+          </button>
+        )}
         <div className="recommendation-scores">
           <div className="score-item">
             <span className="score-label">Score</span>
-            <span className="score-value">{formatScore(recommendation.score)}</span>
+            <span className="score-value-row">
+              <span className="score-value">
+                {formatScore(originalScore != null ? originalScore : recommendation.score)}
+              </span>
+              {originalScore != null && originalScore !== recommendation.score && (
+                <span
+                  className={`score-delta ${recommendation.score > originalScore ? 'improved' : 'worse'}`}
+                  aria-label={`Updated: ${formatScore(recommendation.score)}`}
+                >
+                  {' \u2192 '}
+                  {formatScore(recommendation.score)}
+                </span>
+              )}
+            </span>
           </div>
+          {originalRank != null && (
+            <div className="score-item rank-item">
+              <span className="score-label">Rank</span>
+              <span className="score-value-row">
+                <span className="score-value">#{originalRank}</span>
+                {originalRank !== rank && (
+                  <span
+                    className={`score-delta ${rank < originalRank ? 'improved' : 'worse'}`}
+                    aria-label={`Updated: #${rank}`}
+                  >
+                    {' \u2192 '}#{rank}
+                  </span>
+                )}
+              </span>
+            </div>
+          )}
           {recommendation.potential_score > 0 && (
             <div className="score-item">
               <span className="score-label">Potential</span>
@@ -83,8 +134,26 @@ export function RecommendationCard({ recommendation, rank }: RecommendationCardP
 
       <div className="recommendation-card-body">
         <div className="recommendation-pieces">
-          <h3>Armor Pieces</h3>
-          <div className="pieces-list">
+          <button
+            type="button"
+            className="recommendation-pieces-toggle"
+            onClick={() => setArmorPiecesExpanded((v) => !v)}
+            aria-expanded={armorPiecesExpanded}
+            aria-controls={`armor-pieces-list-${rank}`}
+            id={`armor-pieces-toggle-${rank}`}
+          >
+            <span className="recommendation-pieces-toggle-icon" aria-hidden>
+              {armorPiecesExpanded ? '\u25BC' : '\u25B6'}
+            </span>
+            <h3>Armor Pieces</h3>
+          </button>
+          {armorPiecesExpanded && (
+          <div
+            id={`armor-pieces-list-${rank}`}
+            className="pieces-list"
+            role="region"
+            aria-labelledby={`armor-pieces-toggle-${rank}`}
+          >
             {recommendation.pieces.map((piece, index) => (
               <div key={index} className="piece-item">
                 <button
@@ -165,6 +234,7 @@ export function RecommendationCard({ recommendation, rank }: RecommendationCardP
               </div>
             ))}
           </div>
+          )}
         </div>
 
         <div className="recommendation-stats">
