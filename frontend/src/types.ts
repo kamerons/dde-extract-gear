@@ -32,6 +32,12 @@ export interface RecommendationPiece {
   current_level: number;
   max_level: number;
   stats: Record<string, number>;
+  /** Filename (primary locator); row/col are within this armor type. */
+  filename?: string;
+  subdir?: string;
+  page?: number;
+  row?: number;
+  col?: number;
 }
 
 export interface Recommendation {
@@ -42,6 +48,19 @@ export interface Recommendation {
   effective_stats: Record<string, number>;
   wasted_points: Record<string, number>;
   score: number;
+  score_breakdown?: Record<string, number>;
   potential_score: number;
   flexibility_score: number;
+}
+
+/** Task result payload: recommendations plus weights and formula used. */
+export interface RecommendationTaskResult {
+  recommendations: Recommendation[];
+  count?: number;
+  weights_used?: Record<string, number>;
+  formula_constants?: {
+    ranges: Record<string, [number, number]>;
+    stat_types: string[];
+    description: string;
+  };
 }

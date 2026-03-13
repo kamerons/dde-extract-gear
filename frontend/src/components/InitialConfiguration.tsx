@@ -1,11 +1,17 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { StatType, BuildPreferences } from '../types';
-import { getDataFiles } from '../api/recommendations';
+import { getDataFiles, getRequestFromPreferences } from '../api/recommendations';
+import { getStatDisplayName } from '../constants';
+import { ALL_STATS } from '../constants';
 import { StatMultiSelect } from './StatMultiSelect';
 import { StatNumberInput } from './StatNumberInput';
 
 interface InitialConfigurationProps {
-  onNavigateToResults: (preferences: BuildPreferences, dataFile?: string) => void;
+  onNavigateToResults: (
+    preferences: BuildPreferences,
+    dataFile?: string,
+    initialWeights?: Record<string, number>
+  ) => void;
   onError?: (error: string | null) => void;
   error?: string | null;
 }
@@ -26,6 +32,7 @@ export function InitialConfiguration({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [dataFiles, setDataFiles] = useState<string[]>([]);
   const [selectedDataFile, setSelectedDataFile] = useState<string>('');
+  const [localWeights, setLocalWeights] = useState<Record<string, number>>({});
 
   useEffect(() => {
     getDataFiles()
@@ -40,6 +47,21 @@ export function InitialConfiguration({
       })
       .catch(() => setDataFiles([]));
   }, []);
+
+  const derivedWeights = useMemo(() => {
+    const preferences: BuildPreferences = {
+      maximizeStats,
+      ignoreStats,
+      minConstraints,
+      softCaps,
+    };
+    return getRequestFromPreferences(preferences).weights;
+  }, [maximizeStats, ignoreStats, minConstraints, softCaps]);
+
+  // Sync editable weights when maximize/ignore (or prefs) change so derived values are the default
+  useEffect(() => {
+    setLocalWeights(derivedWeights);
+  }, [derivedWeights]);
 
   // Validation: can't maximize and ignore the same stat
   const getDisabledStatsForMaximize = (): StatType[] => {
@@ -81,9 +103,9 @@ export function InitialConfiguration({
     };
 
     setIsSubmitting(true);
-    onNavigateToResults(preferences, selectedDataFile || undefined);
+    onNavigateToResults(preferences, selectedDataFile || undefined, localWeights);
     setIsSubmitting(false);
-  }, [maximizeStats, ignoreStats, minConstraints, softCaps, selectedDataFile, onNavigateToResults, onError]);
+  }, [maximizeStats, ignoreStats, minConstraints, softCaps, selectedDataFile, localWeights, onNavigateToResults, onError]);
 
   return (
     <div className="configuration-container">
@@ -164,6 +186,40 @@ export function InitialConfiguration({
             placeholder="Threshold value"
             min={0}
           />
+        </div>
+      </div>
+
+      <div className="configuration-weights-preview">
+        <h3 className="config-pane-title">Score weights (preview)</h3>
+        <p className="config-formula-description">
+          Weights are derived from Stats to Maximize / Ignore; you can edit them below. These
+          weights will be used for recommendations.
+        </p>
+        <div className="config-weights">
+          <h4 className="config-section-label">Stat weights (editable)</h4>
+          <div className="config-weights-list">
+            {ALL_STATS.map((stat) => (
+              <label key={stat} className="config-weight-item">
+                <span className="config-weight-label">{getStatDisplayName(stat) ?? stat}</span>
+                <input
+                  type="number"
+                  min={0}
+                  step={0.05}
+                  value={localWeights[stat] ?? ''}
+                  onChange={(e) => {
+                    const v = e.target.value === '' ? undefined : parseFloat(e.target.value);
+                    if (v !== undefined && (isNaN(v) || v < 0)) return;
+                    setLocalWeights((prev) => ({
+                      ...prev,
+                      [stat]: v ?? 0,
+                    }));
+                  }}
+                  className="config-weight-input"
+                  aria-label={`Weight for ${getStatDisplayName(stat) ?? stat}`}
+                />
+              </label>
+            ))}
+          </div>
         </div>
       </div>
 

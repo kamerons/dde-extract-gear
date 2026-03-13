@@ -65,6 +65,12 @@ class RecommendationPiece(BaseModel):
     current_level: int
     max_level: int
     stats: Dict[str, int]
+    # Location in data (filename is primary locator; row/col are within that armor type)
+    filename: Optional[str] = None
+    subdir: Optional[str] = None
+    page: Optional[int] = None
+    row: Optional[int] = None
+    col: Optional[int] = None
 
 
 class Recommendation(BaseModel):
@@ -76,6 +82,7 @@ class Recommendation(BaseModel):
     effective_stats: Dict[str, int]
     wasted_points: Dict[str, int]
     score: float
+    score_breakdown: Optional[Dict[str, float]] = None
     potential_score: float = 0.0
     flexibility_score: float = 0.0
 

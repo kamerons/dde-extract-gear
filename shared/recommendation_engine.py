@@ -46,6 +46,26 @@ class RecommendationEngine:
         self.stat_normalizer = StatNormalizer()
         self.constraint_manager = ConstraintManager()
 
+    def _get_stat(self, piece: Dict, stat: str) -> int:
+        """
+        Get stat value from a piece, supporting both nested stats (armor_run1 format)
+        and top-level stats (legacy format).
+
+        Args:
+            piece: Armor piece dictionary (may have stats in piece['stats'] or at top level)
+            stat: Stat name (e.g. 'base', 'fire')
+
+        Returns:
+            Stat value as int (0 if missing)
+        """
+        if isinstance(piece.get('stats'), dict):
+            val = piece['stats'].get(stat, 0)
+        else:
+            val = piece.get(stat, 0)
+        if isinstance(val, (int, float)):
+            return int(val)
+        return 0
+
     def aggregate_stats(self, pieces: List[Dict]) -> Dict[str, int]:
         """
         Aggregate stats from multiple armor pieces.
@@ -60,10 +80,7 @@ class RecommendationEngine:
 
         for piece in pieces:
             for stat in self.STAT_TYPES:
-                # Get stat value, default to 0 if missing
-                stat_value = piece.get(stat, 0)
-                if isinstance(stat_value, (int, float)):
-                    aggregated[stat] += int(stat_value)
+                aggregated[stat] += self._get_stat(piece, stat)
 
         return aggregated
 
@@ -93,6 +110,30 @@ class RecommendationEngine:
 
         return score
 
+    def calculate_score_breakdown(
+        self,
+        stats: Dict[str, int],
+        weights: Dict[str, float]
+    ) -> Dict[str, float]:
+        """
+        Per-stat contribution to the weighted score: contribution[stat] = normalize(stat, value) * weight[stat].
+
+        Args:
+            stats: Dictionary of stat values
+            weights: Dictionary of stat weights
+
+        Returns:
+            Dictionary mapping stat name to contribution (sum equals calculate_score(stats, weights))
+        """
+        breakdown: Dict[str, float] = {}
+        if not weights:
+            return breakdown
+        for stat, value in stats.items():
+            if stat in weights and weights[stat] > 0:
+                normalized = self.stat_normalizer.normalize_stat(stat, value)
+                breakdown[stat] = normalized * weights[stat]
+        return breakdown
+
     @lru_cache(maxsize=10000)
     def _get_cached_piece_stats(self, stat_values_tuple: Tuple[int, ...]) -> Dict[str, int]:
         """
@@ -116,11 +157,8 @@ class RecommendationEngine:
         Returns:
             Dictionary of stat values (defaults to 0 for missing stats)
         """
-        # Extract stat values as tuple for caching
-        stat_values = tuple(
-            int(piece.get(stat, 0)) if isinstance(piece.get(stat, 0), (int, float)) else 0
-            for stat in self.STAT_TYPES
-        )
+        # Extract stat values as tuple for caching (supports nested or top-level stats)
+        stat_values = tuple(self._get_stat(piece, stat) for stat in self.STAT_TYPES)
         return self._get_cached_piece_stats(stat_values)
 
     def is_dominated(self, piece_a: Dict, piece_b: Dict) -> bool:
@@ -224,7 +262,7 @@ class RecommendationEngine:
 
         for armor_type, pieces in pieces_by_armor_type.items():
             for stat in self.STAT_TYPES:
-                max_for_type = max((p.get(stat, 0) for p in pieces), default=0)
+                max_for_type = max((self._get_stat(p, stat) for p in pieces), default=0)
                 max_possible_stats[stat] += max_for_type
 
         # Check if max possible stats can satisfy all constraints
@@ -265,7 +303,7 @@ class RecommendationEngine:
         for armor_type in remaining_armor_types:
             pieces = pieces_by_armor_type.get(armor_type, [])
             for stat in self.STAT_TYPES:
-                max_for_type = max((p.get(stat, 0) for p in pieces), default=0)
+                max_for_type = max((self._get_stat(p, stat) for p in pieces), default=0)
                 max_remaining[stat] += max_for_type
 
         # Check if current + max remaining can satisfy constraints
@@ -385,7 +423,7 @@ class RecommendationEngine:
                     if heap:
                         sorted_heap = sorted(heap, key=lambda x: -x[0])
                         partial = [
-                            self._format_scored_set(combo_list, stats, score, idx)
+                            self._format_scored_set(combo_list, stats, score, idx, weights)
                             for idx, (score, _, combo_list, stats) in enumerate(sorted_heap[:limit])
                         ]
                     progress_callback(evaluated, total_planned, partial)
@@ -429,7 +467,7 @@ class RecommendationEngine:
             if heap:
                 sorted_heap = sorted(heap, key=lambda x: -x[0])
                 partial = [
-                    self._format_scored_set(combo_list, stats, score, idx)
+                    self._format_scored_set(combo_list, stats, score, idx, weights)
                     for idx, (score, _, combo_list, stats) in enumerate(sorted_heap[:limit])
                 ]
             progress_callback(evaluated, total_planned, partial)
@@ -460,24 +498,30 @@ class RecommendationEngine:
         armor_set: List[Dict],
         aggregated_stats: Dict[str, int],
         score: float,
-        idx: int
+        idx: int,
+        weights: Dict[str, float],
     ) -> Dict:
         """Format a single (armor_set, stats, score) as a recommendation dict."""
         set_id = self.generate_set_id(armor_set, idx)
         formatted_pieces = []
         for piece in armor_set:
             piece_stats = {
-                stat: piece.get(stat, 0)
+                stat: self._get_stat(piece, stat)
                 for stat in self.STAT_TYPES
-                if isinstance(piece.get(stat, 0), (int, float))
             }
-            formatted_pieces.append({
+            out_piece = {
                 'armor_set': piece.get('armor_set', ''),
                 'armor_type': piece.get('armor_type', ''),
                 'current_level': piece.get('current_level', 1),
                 'max_level': piece.get('max_level', 16),
                 'stats': piece_stats
-            })
+            }
+            # Pass through location fields when present (filename is primary locator)
+            for key in ('filename', 'subdir', 'page', 'row', 'col'):
+                if key in piece and piece[key] is not None:
+                    out_piece[key] = piece[key]
+            formatted_pieces.append(out_piece)
+        score_breakdown = self.calculate_score_breakdown(aggregated_stats, weights) if weights else {}
         return {
             'set_id': set_id,
             'pieces': formatted_pieces,
@@ -486,6 +530,7 @@ class RecommendationEngine:
             'effective_stats': aggregated_stats.copy(),
             'wasted_points': {stat: 0 for stat in self.STAT_TYPES},
             'score': score,
+            'score_breakdown': score_breakdown,
             'potential_score': 0.0,
             'flexibility_score': 0.0,
         }
@@ -623,7 +668,7 @@ class RecommendationEngine:
             # Format results for this set
             for idx, (score, armor_set, aggregated_stats) in enumerate(results):
                 all_scored_sets.append(
-                    self._format_scored_set(armor_set, aggregated_stats, score, idx)
+                    self._format_scored_set(armor_set, aggregated_stats, score, idx, weights)
                 )
 
             evaluated_so_far += total_this_set

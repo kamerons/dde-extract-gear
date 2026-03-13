@@ -136,6 +136,7 @@ async def get_recommendations(
             effective_stats=rec_data['effective_stats'],
             wasted_points=rec_data['wasted_points'],
             score=rec_data['score'],
+            score_breakdown=rec_data.get('score_breakdown'),
             potential_score=rec_data['potential_score'],
             flexibility_score=rec_data['flexibility_score']
         )

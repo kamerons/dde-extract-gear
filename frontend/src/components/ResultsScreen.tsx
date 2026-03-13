@@ -1,20 +1,56 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { BuildPreferences, Recommendation } from '../types';
 import { RecommendationCard } from './RecommendationCard';
+import { getStatDisplayName } from '../constants';
+import type { StatType } from '../types';
+import { ALL_STATS } from '../constants';
 import {
   getTaskStatus,
+  getRequestFromPreferences,
   submitInitialPreferencesAsync,
+  submitTaskWithWeights,
   POLL_INTERVAL_MS,
 } from '../api/recommendations';
 
 interface ResultsScreenProps {
   initialPreferences: BuildPreferences;
   initialDataFile?: string;
+  /** When provided (e.g. edited on initial config), use these weights for the task instead of deriving from preferences. */
+  initialWeights?: Record<string, number>;
   onBack: () => void;
 }
 
-/** Merge incoming results into existing list: keep existing order, update in place, append new set_ids. */
-function mergeRecommendationsBySetId(
+interface FormulaConstants {
+  ranges: Record<string, [number, number]>;
+  stat_types: string[];
+  description: string;
+}
+
+/** Default formula constants (match backend StatNormalizer) so config pane is populated before task completes. */
+const DEFAULT_FORMULA_CONSTANTS: FormulaConstants = {
+  description:
+    'score = sum( normalize(stat, value) * weight(stat) ); normalize(stat, value) = value / reference_scale(stat), no cap (relative scaling only).',
+  stat_types: [...ALL_STATS],
+  ranges: {
+    base: [0, 150],
+    fire: [0, 50],
+    electric: [0, 50],
+    poison: [0, 50],
+    hero_hp: [0, 50],
+    hero_dmg: [0, 50],
+    hero_rate: [0, 50],
+    hero_speed: [0, 25],
+    offense: [0, 50],
+    defense: [0, 50],
+    tower_hp: [0, 50],
+    tower_dmg: [0, 50],
+    tower_rate: [0, 50],
+    tower_range: [0, 50],
+  },
+};
+
+/** Merge incoming results: update in place by set_id, append new, then sort by score descending. */
+function mergeAndSortRecommendations(
   existing: Recommendation[],
   incoming: Recommendation[]
 ): Recommendation[] {
@@ -31,23 +67,81 @@ function mergeRecommendationsBySetId(
       result.push(rec);
     }
   }
+  result.sort((a, b) => b.score - a.score);
   return result;
 }
 
-export function ResultsScreen({ initialPreferences, initialDataFile, onBack }: ResultsScreenProps) {
+/** Recalculate score from breakdown when weights change: new_score = sum( contribution/w_old * w_new ). */
+function recalcScore(
+  rec: Recommendation,
+  weightsUsed: Record<string, number>,
+  newWeights: Record<string, number>
+): number {
+  const breakdown = rec.score_breakdown;
+  if (!breakdown) return rec.score;
+  let score = 0;
+  for (const [stat, contribution] of Object.entries(breakdown)) {
+    const wOld = weightsUsed[stat];
+    if (wOld != null && wOld > 0) {
+      const wNew = newWeights[stat] ?? 0;
+      score += (contribution / wOld) * wNew;
+    }
+  }
+  return score;
+}
+
+export function ResultsScreen({
+  initialPreferences,
+  initialDataFile,
+  initialWeights,
+  onBack,
+}: ResultsScreenProps) {
   const [taskId, setTaskId] = useState<string | null>(null);
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [status, setStatus] = useState<'pending' | 'processing' | 'completed' | 'failed' | 'cancelled' | 'not_found'>('pending');
   const [progress, setProgress] = useState<{ evaluated: number; total_planned: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [weightsUsed, setWeightsUsed] = useState<Record<string, number> | null>(null);
+  const [formulaConstants, setFormulaConstants] = useState<FormulaConstants | null>(null);
+  const [localWeights, setLocalWeights] = useState<Record<string, number>>({});
+  const [isRecalculating, setIsRecalculating] = useState(false);
   const stoppedRef = useRef(false);
+
+  const initialRequestParams = useMemo(() => {
+    if (!initialPreferences) return null;
+    const { weights, constraints } = getRequestFromPreferences(initialPreferences);
+    return { weights, constraints, dataFile: initialDataFile, limit: 10 };
+  }, [initialPreferences, initialDataFile]);
+
+  // Populate weights and formula as soon as we have preferences (so config pane is usable before task completes)
+  useEffect(() => {
+    if (!initialPreferences) return;
+    const weights =
+      initialWeights && Object.keys(initialWeights).length > 0
+        ? initialWeights
+        : getRequestFromPreferences(initialPreferences).weights;
+    setWeightsUsed(weights);
+    setLocalWeights(weights);
+    setFormulaConstants(DEFAULT_FORMULA_CONSTANTS);
+  }, [initialPreferences, initialWeights]);
 
   // Create task when we have preferences and no taskId yet
   useEffect(() => {
     if (!initialPreferences || taskId !== null) return;
     let cancelled = false;
     setStatus('pending');
-    submitInitialPreferencesAsync(initialPreferences, initialDataFile)
+    const startTask = () => {
+      if (initialWeights && Object.keys(initialWeights).length > 0 && initialRequestParams) {
+        return submitTaskWithWeights(
+          initialWeights,
+          initialRequestParams.constraints,
+          initialRequestParams.dataFile,
+          initialRequestParams.limit
+        );
+      }
+      return submitInitialPreferencesAsync(initialPreferences, initialDataFile);
+    };
+    startTask()
       .then((id) => {
         if (!cancelled) setTaskId(id);
       })
@@ -60,7 +154,7 @@ export function ResultsScreen({ initialPreferences, initialDataFile, onBack }: R
     return () => {
       cancelled = true;
     };
-  }, [initialPreferences, initialDataFile, taskId]);
+  }, [initialPreferences, initialDataFile, initialWeights, initialRequestParams, taskId]);
 
   // Poll when we have a taskId
   useEffect(() => {
@@ -82,8 +176,17 @@ export function ResultsScreen({ initialPreferences, initialDataFile, onBack }: R
 
           if (response.results?.recommendations) {
             setRecommendations((prev) =>
-              mergeRecommendationsBySetId(prev, response.results!.recommendations)
+              mergeAndSortRecommendations(prev, response.results!.recommendations)
             );
+          }
+          if (response.results?.weights_used != null) {
+            setWeightsUsed(response.results.weights_used);
+            setLocalWeights((prev) =>
+              Object.keys(prev).length === 0 ? response.results!.weights_used! : prev
+            );
+          }
+          if (response.results?.formula_constants != null) {
+            setFormulaConstants(response.results.formula_constants);
           }
 
           if (
@@ -122,6 +225,31 @@ export function ResultsScreen({ initialPreferences, initialDataFile, onBack }: R
     };
   }, [taskId]);
 
+  const displayRecommendations = useMemo(() => {
+    if (recommendations.length === 0) return [];
+    if (
+      !weightsUsed ||
+      Object.keys(localWeights).length === 0 ||
+      recommendations.some((r) => !r.score_breakdown)
+    ) {
+      return [...recommendations].sort((a, b) => b.score - a.score);
+    }
+    const sameWeights =
+      Object.keys(weightsUsed).length === Object.keys(localWeights).length &&
+      Object.keys(weightsUsed).every(
+        (k) => (weightsUsed[k] ?? 0) === (localWeights[k] ?? 0)
+      );
+    if (sameWeights) {
+      return [...recommendations].sort((a, b) => b.score - a.score);
+    }
+    return recommendations
+      .map((rec) => ({
+        ...rec,
+        score: recalcScore(rec, weightsUsed, localWeights),
+      }))
+      .sort((a, b) => b.score - a.score);
+  }, [recommendations, weightsUsed, localWeights]);
+
   const progressPercent =
     progress && progress.total_planned > 0
       ? Math.round((100 * progress.evaluated) / progress.total_planned)
@@ -143,6 +271,33 @@ export function ResultsScreen({ initialPreferences, initialDataFile, onBack }: R
       </div>
     );
   }
+
+  const statTypesForWeights = formulaConstants?.stat_types ?? ALL_STATS;
+
+  const handleRecalculate = () => {
+    if (!initialRequestParams || isRecalculating) return;
+    setIsRecalculating(true);
+    submitTaskWithWeights(
+      localWeights,
+      initialRequestParams.constraints,
+      initialRequestParams.dataFile,
+      initialRequestParams.limit
+    )
+      .then((newTaskId) => {
+        setTaskId(newTaskId);
+        setRecommendations([]);
+        setStatus('pending');
+        setError(null);
+        setWeightsUsed(localWeights);
+      })
+      .catch((err) => {
+        setError(err instanceof Error ? err.message : 'Recalculate failed');
+        setStatus('failed');
+      })
+      .finally(() => {
+        setIsRecalculating(false);
+      });
+  };
 
   return (
     <div className="results-container">
@@ -176,14 +331,79 @@ export function ResultsScreen({ initialPreferences, initialDataFile, onBack }: R
       )}
 
       {recommendations.length > 0 && (
-        <div className="recommendations-grid">
-          {recommendations.map((recommendation, index) => (
-            <RecommendationCard
-              key={recommendation.set_id}
-              recommendation={recommendation}
-              rank={index + 1}
-            />
-          ))}
+        <div className="results-two-pane">
+          <div className="results-left-pane">
+            <div className="recommendations-grid">
+              {displayRecommendations.map((recommendation, index) => (
+                <RecommendationCard
+                  key={recommendation.set_id}
+                  recommendation={recommendation}
+                  rank={index + 1}
+                />
+              ))}
+            </div>
+          </div>
+          <div className="results-config-pane">
+            <h3 className="config-pane-title">Score configuration</h3>
+            <p className="config-formula-description">
+              {formulaConstants?.description ??
+                'score = sum( normalize(stat, value) * weight(stat) ); normalize = value / reference_scale, no cap.'}
+            </p>
+            {formulaConstants?.ranges && (
+              <div className="config-ranges">
+                <h4 className="config-section-label">Reference scales (read-only)</h4>
+                <ul className="config-ranges-list">
+                  {statTypesForWeights.map((stat) => {
+                    const range = formulaConstants.ranges[stat];
+                    if (!range) return null;
+                    return (
+                      <li key={stat} className="config-range-item">
+                        <span className="stat-name">{getStatDisplayName(stat as StatType) ?? stat}</span>
+                        <span className="config-range-value">[0, {range[1]}]</span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            )}
+            <div className="config-weights">
+              <h4 className="config-section-label">Stat weights (editable)</h4>
+              <p className="config-weights-hint">Changing a weight recalculates and re-sorts the list. Click Recalculate to run a new task with the current weights.</p>
+              <div className="config-weights-list">
+                {statTypesForWeights.map((stat) => (
+                  <label key={stat} className="config-weight-item">
+                    <span className="config-weight-label">{getStatDisplayName(stat as StatType) ?? stat}</span>
+                    <input
+                      type="number"
+                      min={0}
+                      step={0.05}
+                      value={localWeights[stat] ?? ''}
+                      onChange={(e) => {
+                        const v = e.target.value === '' ? undefined : parseFloat(e.target.value);
+                        if (v !== undefined && (isNaN(v) || v < 0)) return;
+                        setLocalWeights((prev) => ({
+                          ...prev,
+                          [stat]: v ?? 0,
+                        }));
+                      }}
+                      className="config-weight-input"
+                      aria-label={`Weight for ${getStatDisplayName(stat as StatType) ?? stat}`}
+                    />
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div className="config-actions">
+              <button
+                type="button"
+                onClick={handleRecalculate}
+                disabled={!initialRequestParams || isRecalculating || isProcessing}
+                className="recalculate-button"
+              >
+                {isRecalculating ? 'Starting…' : 'Recalculate'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

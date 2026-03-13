@@ -9,6 +9,7 @@ from shared.recommendation_engine import (
     TooManyCombinationsError,
     TaskCancelledError,
 )
+from shared.stat_normalizer import StatNormalizer
 
 logger = logging.getLogger(__name__)
 
@@ -90,10 +91,26 @@ class RecommendationProcessor:
                 check_cancelled=check_cancelled
             )
 
+            # Formula constants for UI: reference scales and description
+            ranges = {
+                stat: [min_val, max_val]
+                for stat, (min_val, max_val) in StatNormalizer.STAT_GROUPS.items()
+            }
+            formula_constants = {
+                "ranges": ranges,
+                "stat_types": list(RecommendationEngine.STAT_TYPES),
+                "description": (
+                    "score = sum( normalize(stat, value) * weight(stat) ); "
+                    "normalize(stat, value) = value / reference_scale(stat), no cap (relative scaling only)."
+                ),
+            }
+
             # Format response
             return {
                 "recommendations": recommendations_data,
-                "count": len(recommendations_data)
+                "count": len(recommendations_data),
+                "weights_used": weights,
+                "formula_constants": formula_constants,
             }
         except TooManyCombinationsError as e:
             logger.error(f"Too many combinations: {e}")

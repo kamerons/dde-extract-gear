@@ -1,4 +1,10 @@
-import type { BuildPreferences, Recommendation, RecommendationPiece } from '../types';
+import type {
+  BuildPreferences,
+  Recommendation,
+  RecommendationPiece,
+  RecommendationTaskResult,
+} from '../types';
+import { ALL_STATS } from '../constants';
 
 export interface RecommendationResponse {
   recommendations: Recommendation[];
@@ -14,7 +20,7 @@ export interface RecommendationResponse {
 export interface TaskResponse {
   task_id: string;
   status: 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled' | 'not_found';
-  results?: RecommendationResponse;
+  results?: RecommendationTaskResult;
   progress?: { evaluated: number; total_planned: number };
   error?: string;
   created_at?: string;
@@ -44,25 +50,76 @@ function convertPreferencesToRequest(preferences: BuildPreferences): {
   const weights: Record<string, number> = {};
   const constraints: { min: Record<string, number> } = { min: {} };
 
-  // Convert maximizeStats to weights (equal weight for all maximized stats)
-  if (preferences.maximizeStats.length > 0) {
-    const weightPerStat = 1.0 / preferences.maximizeStats.length;
-    for (const stat of preferences.maximizeStats) {
-      weights[stat] = weightPerStat;
+  const maximized = preferences.maximizeStats;
+  const ignored = new Set(preferences.ignoreStats);
+  const numMaximized = maximized.length;
+
+  if (numMaximized > 0) {
+    const fullWeight = 1.0 / numMaximized;
+    const halfWeight = fullWeight * 0.5;
+    for (const stat of ALL_STATS) {
+      if (ignored.has(stat)) continue;
+      weights[stat] = maximized.includes(stat) ? fullWeight : halfWeight;
+    }
+  } else {
+    const nonIgnored = ALL_STATS.filter((s) => !ignored.has(s));
+    const w = nonIgnored.length > 0 ? 1.0 / nonIgnored.length : 0;
+    for (const stat of nonIgnored) {
+      weights[stat] = w;
     }
   }
 
-  // Convert minConstraints to constraints.min
   for (const [stat, value] of Object.entries(preferences.minConstraints)) {
     if (value !== undefined && value > 0) {
       constraints.min[stat] = value;
     }
   }
 
-  // Note: softCaps are not sent in the initial request - they're discovered reactively
-  // ignoreStats are handled by not including them in weights
-
   return { weights, constraints };
+}
+
+/**
+ * Get weights and constraints from build preferences (e.g. to populate UI before task completes).
+ */
+export function getRequestFromPreferences(preferences: BuildPreferences): {
+  weights: Record<string, number>;
+  constraints: { min: Record<string, number> };
+} {
+  return convertPreferencesToRequest(preferences);
+}
+
+/**
+ * Start a new recommendation task with explicit weights and constraints.
+ * Returns task_id for polling. Use this for "Recalculate" with current config-pane weights.
+ */
+export async function submitTaskWithWeights(
+  weights: Record<string, number>,
+  constraints: { min: Record<string, number> },
+  dataFile?: string,
+  limit: number = 10
+): Promise<string> {
+  const response = await fetch(`${API_BASE_URL}/api/recommendations`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      weights,
+      constraints: { min: constraints.min ?? {} },
+      limit,
+      ...(dataFile ? { data_file: dataFile } : {}),
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Failed to create recommendation task: ${response.status} ${response.statusText}. ${errorText}`
+    );
+  }
+
+  const data: { task_id: string; status: string; message?: string } = await response.json();
+  return data.task_id;
 }
 
 /**

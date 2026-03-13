@@ -11,21 +11,30 @@ type Tab = 'recommendations' | 'training' | 'verification';
 
 function App() {
   const [currentView, setCurrentView] = useState<View>('configuration');
-  const [activeTab, setActiveTab] = useState<Tab>('training');
+  const [activeTab, setActiveTab] = useState<Tab>('recommendations');
   const [pendingPreferences, setPendingPreferences] = useState<BuildPreferences | null>(null);
   const [pendingDataFile, setPendingDataFile] = useState<string | undefined>(undefined);
+  const [pendingInitialWeights, setPendingInitialWeights] = useState<
+    Record<string, number> | undefined
+  >(undefined);
   const [configError, setConfigError] = useState<string | null>(null);
 
-  const handleNavigateToResults = (preferences: BuildPreferences, dataFile?: string) => {
+  const handleNavigateToResults = (
+    preferences: BuildPreferences,
+    dataFile?: string,
+    initialWeights?: Record<string, number>
+  ) => {
     setConfigError(null);
     setPendingPreferences(preferences);
     setPendingDataFile(dataFile);
+    setPendingInitialWeights(initialWeights);
     setCurrentView('results');
   };
 
   const handleBackToConfiguration = () => {
     setPendingPreferences(null);
     setPendingDataFile(undefined);
+    setPendingInitialWeights(undefined);
     setCurrentView('configuration');
   };
 
@@ -34,6 +43,7 @@ function App() {
       <ResultsScreen
         initialPreferences={pendingPreferences}
         initialDataFile={pendingDataFile}
+        initialWeights={pendingInitialWeights}
         onBack={handleBackToConfiguration}
       />
     );
