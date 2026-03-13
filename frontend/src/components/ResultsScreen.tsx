@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { BuildPreferences, Recommendation } from '../types';
+import type { BuildPreferences, Recommendation, SearchMode } from '../types';
 import { RecommendationCard } from './RecommendationCard';
 import { getStatDisplayName } from '../constants';
 import type { StatType } from '../types';
@@ -106,6 +106,8 @@ export function ResultsScreen({
   const [localWeights, setLocalWeights] = useState<Record<string, number>>({});
   const [isRecalculating, setIsRecalculating] = useState(false);
   const [compareSelection, setCompareSelection] = useState<[string | null, string | null]>([null, null]);
+  const [currentSearchMode, setCurrentSearchMode] = useState<SearchMode>('broad');
+  const [selectedBaseSetId, setSelectedBaseSetId] = useState<string | null>(null);
   const stoppedRef = useRef(false);
   const comparisonPanelRef = useRef<HTMLDivElement>(null);
 
@@ -144,21 +146,24 @@ export function ResultsScreen({
     setFormulaConstants(DEFAULT_FORMULA_CONSTANTS);
   }, [initialPreferences, initialWeights]);
 
-  // Create task when we have preferences and no taskId yet
+  // Create task when we have preferences and no taskId yet (always broad, no base)
   useEffect(() => {
     if (!initialPreferences || taskId !== null) return;
     let cancelled = false;
     setStatus('pending');
+    setCurrentSearchMode('broad');
     const startTask = () => {
       if (initialWeights && Object.keys(initialWeights).length > 0 && initialRequestParams) {
         return submitTaskWithWeights(
           initialWeights,
           initialRequestParams.constraints,
           initialRequestParams.dataFile,
-          initialRequestParams.limit
+          initialRequestParams.limit,
+          'broad',
+          null
         );
       }
-      return submitInitialPreferencesAsync(initialPreferences, initialDataFile);
+      return submitInitialPreferencesAsync(initialPreferences, initialDataFile, 'broad', null);
     };
     startTask()
       .then((id) => {
@@ -320,11 +325,14 @@ export function ResultsScreen({
     stoppedRef.current = true;
     setError(null);
     setIsRecalculating(true);
+    const baseInfo = currentSearchMode === 'deep' && selectedBaseSetId ? { setId: selectedBaseSetId } : null;
     submitTaskWithWeights(
       localWeights,
       initialRequestParams.constraints,
       initialRequestParams.dataFile,
-      initialRequestParams.limit
+      initialRequestParams.limit,
+      currentSearchMode,
+      baseInfo
     )
       .then((newTaskId) => {
         setTaskId(newTaskId);
@@ -361,9 +369,64 @@ export function ResultsScreen({
               : 'Evaluating combinations…'
             : `Found ${recommendations.length} recommendation${recommendations.length !== 1 ? 's' : ''}`}
         </p>
-        <button onClick={onBack} className="back-button">
-          ← Back to Configuration
-        </button>
+        <div className="results-header-actions">
+          <button onClick={onBack} className="back-button">
+            ← Back to Configuration
+          </button>
+          {recommendations.length > 0 && !isProcessing && (
+            <>
+              <button
+                type="button"
+                className="broad-search-button"
+                disabled={isRecalculating}
+                onClick={() => {
+                  if (!initialRequestParams || isRecalculating) return;
+                  stoppedRef.current = true;
+                  setError(null);
+                  setIsRecalculating(true);
+                  setCurrentSearchMode('broad');
+                  setRecommendations([]);
+                  setStatus('pending');
+                  const weights = localWeights && Object.keys(localWeights).length > 0 ? localWeights : getRequestFromPreferences(initialPreferences).weights;
+                  submitTaskWithWeights(weights, initialRequestParams.constraints, initialRequestParams.dataFile, initialRequestParams.limit, 'broad', null)
+                    .then((newTaskId) => setTaskId(newTaskId))
+                    .catch((err) => {
+                      setError(err instanceof Error ? err.message : 'Broad search failed');
+                      setStatus('failed');
+                    })
+                    .finally(() => setIsRecalculating(false));
+                }}
+              >
+                Broad search
+              </button>
+              <button
+                type="button"
+                className="deep-search-button"
+                disabled={selectedBaseSetId == null || isRecalculating}
+                title={selectedBaseSetId == null ? 'Select a recommendation as base first (Use as base)' : 'Run deep search around selected base'}
+                onClick={() => {
+                  if (!initialRequestParams || selectedBaseSetId == null || isRecalculating) return;
+                  stoppedRef.current = true;
+                  setError(null);
+                  setIsRecalculating(true);
+                  setCurrentSearchMode('deep');
+                  setRecommendations([]);
+                  setStatus('pending');
+                  const weights = localWeights && Object.keys(localWeights).length > 0 ? localWeights : getRequestFromPreferences(initialPreferences).weights;
+                  submitTaskWithWeights(weights, initialRequestParams.constraints, initialRequestParams.dataFile, initialRequestParams.limit, 'deep', { setId: selectedBaseSetId })
+                    .then((newTaskId) => setTaskId(newTaskId))
+                    .catch((err) => {
+                      setError(err instanceof Error ? err.message : 'Deep search failed');
+                      setStatus('failed');
+                    })
+                    .finally(() => setIsRecalculating(false));
+                }}
+              >
+                Deep search from base
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
       {recommendations.length === 0 && !isProcessing && status === 'completed' && (
@@ -399,6 +462,8 @@ export function ResultsScreen({
                           rank={rank}
                           onCompareWith={() => handleCompareWith(setId)}
                           isCompareSelected={true}
+                          onSelectAsBase={() => setSelectedBaseSetId(setId)}
+                          isBaseSelected={selectedBaseSetId === setId}
                           originalScore={
                             weightsDiffer ? recommendationsById.get(rec.set_id)?.score : undefined
                           }
@@ -423,6 +488,8 @@ export function ResultsScreen({
                     recommendation.set_id === compareSelection[0] ||
                     recommendation.set_id === compareSelection[1]
                   }
+                  onSelectAsBase={() => setSelectedBaseSetId(recommendation.set_id)}
+                  isBaseSelected={selectedBaseSetId === recommendation.set_id}
                   originalScore={
                     weightsDiffer ? recommendationsById.get(recommendation.set_id)?.score : undefined
                   }

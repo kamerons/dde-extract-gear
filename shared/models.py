@@ -47,6 +47,14 @@ class RecommendationRequest(BaseModel):
     constraints: Constraints = Field(default_factory=Constraints)
     limit: int = Field(default=10, ge=1, le=100)
     data_file: Optional[str] = None
+    search_mode: str = Field(
+        default="broad",
+        description="Search mode to use: 'broad' for diverse early-exit search, 'deep' for focused search around a base.",
+    )
+    base_set_id: Optional[str] = Field(
+        default=None,
+        description="Identifier of a previously returned recommendation to use as the base for deep search.",
+    )
 
     @field_validator('weights')
     @classmethod

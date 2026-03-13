@@ -1,17 +1,23 @@
 """Main recommendation engine for armor set optimization."""
 
 import logging
-import math
 import time
 import heapq
 from functools import lru_cache
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, Iterator, List, Optional, Tuple
 from itertools import product
 
 from shared.constraint_manager import ConstraintManager
 from shared.stat_normalizer import StatNormalizer
 
 logger = logging.getLogger(__name__)
+
+# In broad mode, accept only combinations that share at most this many pieces with every already-accepted set.
+MAX_SHARED_PIECES_BROAD = 3
+
+# Broad mode exploration budgets to exit without exhaustive search.
+MAX_EVALUATED_BROAD = 80_000
+MAX_EVALUATED_PER_SET_BROAD = 15_000
 
 
 class TooManyCombinationsError(Exception):
@@ -477,6 +483,73 @@ class RecommendationEngine:
         results.sort(reverse=True, key=lambda x: x[0])
         return results
 
+    @staticmethod
+    def _parse_armor_set_from_set_id(set_id: str) -> Optional[str]:
+        """Parse armor set name from set_id (e.g. 'dark_armor_0_1234' -> 'dark_armor'). Returns None if not parseable."""
+        if not set_id or not set_id.strip():
+            return None
+        parts = set_id.strip().split('_')
+        if len(parts) < 3:
+            return None
+        return '_'.join(parts[:-2]).lower()
+
+    @staticmethod
+    def _piece_key(piece: Dict) -> Tuple:
+        """Stable key for a piece for overlap comparison: (armor_set, armor_type, id or location)."""
+        aid = piece.get('id')
+        if aid:
+            return (piece.get('armor_set', ''), piece.get('armor_type', ''), aid)
+        return (
+            piece.get('armor_set', ''),
+            piece.get('armor_type', ''),
+            (piece.get('filename'), piece.get('subdir'), piece.get('page'), piece.get('row'), piece.get('col')),
+        )
+
+    @staticmethod
+    def _count_shared_pieces(combo_a: List[Dict], combo_b: List[Dict]) -> int:
+        """Number of pieces that appear in both combinations (by _piece_key)."""
+        keys_a = {RecommendationEngine._piece_key(p) for p in combo_a}
+        keys_b = {RecommendationEngine._piece_key(p) for p in combo_b}
+        return len(keys_a & keys_b)
+
+    def _iter_valid_combinations_for_set(
+        self,
+        pieces_by_armor_type: Dict[str, List[Dict]],
+        weights: Dict[str, float],
+        constraints: Dict[str, int],
+        progress_callback: Optional[Callable[[int, int, Optional[List[Dict]]], None]] = None,
+        check_cancelled: Optional[Callable[[], bool]] = None,
+        max_evaluated: Optional[int] = None,
+    ):
+        """
+        Yield (combo_list, aggregated_stats, score) for each valid combination in quality order.
+        Respects constraints, cancellation, and optional max_evaluated limit.
+        """
+        sorted_pieces = self.sort_pieces_by_quality(pieces_by_armor_type, weights)
+        armor_types = list(sorted_pieces.keys())
+        total_planned = 1
+        for at in armor_types:
+            total_planned *= len(sorted_pieces[at])
+        evaluated = 0
+        last_callback = [0.0]
+
+        for combo in product(*[sorted_pieces[at] for at in armor_types]):
+            if max_evaluated is not None and evaluated >= max_evaluated:
+                return
+            evaluated += 1
+            if check_cancelled is not None and check_cancelled():
+                raise TaskCancelledError()
+            if progress_callback and evaluated - int(last_callback[0]) >= 500:
+                last_callback[0] = evaluated
+                progress_callback(evaluated, total_planned, None)
+
+            combo_list = list(combo)
+            stats = self.aggregate_stats(combo_list)
+            if self.constraint_manager.violates_hard_constraints(stats):
+                continue
+            score = self.calculate_score(stats, weights)
+            yield combo_list, stats, score
+
     def generate_set_id(self, pieces: List[Dict], index: int) -> str:
         """
         Generate unique ID for a complete set.
@@ -490,7 +563,7 @@ class RecommendationEngine:
         """
         set_type = pieces[0].get('armor_set', 'unknown')
         # Create ID from set type and piece IDs
-        piece_ids = '_'.join(sorted([p.get('id', '') for p in pieces]))
+        piece_ids = '_'.join(sorted([str(p.get('id', '')) for p in pieces]))
         return f"{set_type.lower().replace(' ', '_')}_{index}_{hash(piece_ids) % 10000}"
 
     def _format_scored_set(
@@ -535,11 +608,151 @@ class RecommendationEngine:
             'flexibility_score': 0.0,
         }
 
+    def _get_recommendations_broad(
+        self,
+        sets_to_process: List[Tuple[str, Dict[str, List[Dict]]]],
+        total_planned_global: int,
+        weights: Dict[str, float],
+        constraints: Dict[str, int],
+        limit: int,
+        progress_callback: Optional[Callable[[int, int, Optional[List[Dict]]], None]],
+        check_cancelled: Optional[Callable[[], bool]],
+    ) -> List[Dict]:
+        """Broad mode: interleave across sets, enforce <= MAX_SHARED_PIECES_BROAD, exit early via budgets."""
+        accepted_combos: List[List[Dict]] = []
+        heap: List[Tuple[float, int, List[Dict], Dict[str, int]]] = []
+        counter = 0
+        evaluated_global = 0
+        last_progress = [0.0]
+
+        # One iterator per set; round-robin pull
+        iters: List[Tuple[str, Iterator[Tuple[List[Dict], Dict[str, int], float]]]] = []
+        for set_type, pieces_by_armor_type in sets_to_process:
+            gen = self._iter_valid_combinations_for_set(
+                pieces_by_armor_type,
+                weights,
+                constraints,
+                progress_callback=None,
+                check_cancelled=check_cancelled,
+                max_evaluated=MAX_EVALUATED_PER_SET_BROAD,
+            )
+            iters.append((set_type, gen))
+        active = list(range(len(iters)))
+        set_index = 0
+
+        try:
+            while active and evaluated_global < MAX_EVALUATED_BROAD and len(accepted_combos) < limit * 2:
+                if check_cancelled is not None and check_cancelled():
+                    raise TaskCancelledError()
+                i = active[set_index % len(active)]
+                set_type, gen = iters[i]
+                try:
+                    combo_list, stats, score = next(gen)
+                except StopIteration:
+                    active = [j for j in active if j != i]
+                    set_index += 1
+                    continue
+                evaluated_global += 1
+
+                # Diversity: accept only if shares <= MAX_SHARED_PIECES_BROAD with every accepted combo
+                too_similar = False
+                for accepted in accepted_combos:
+                    if self._count_shared_pieces(combo_list, accepted) > MAX_SHARED_PIECES_BROAD:
+                        too_similar = True
+                        break
+                if too_similar:
+                    set_index += 1
+                    continue
+
+                accepted_combos.append(combo_list)
+                counter += 1
+                if len(heap) < limit:
+                    heapq.heappush(heap, (score, counter, combo_list, stats))
+                elif score > heap[0][0]:
+                    heapq.heapreplace(heap, (score, counter, combo_list, stats))
+
+                set_index += 1
+                now = time.time()
+                if progress_callback and (now - last_progress[0] >= 0.5 or len(accepted_combos) % 10 == 0):
+                    last_progress[0] = now
+                    partial = [
+                        self._format_scored_set(cl, st, sc, ix, weights)
+                        for ix, (sc, _, cl, st) in enumerate(sorted(heap, key=lambda x: -x[0])[:limit])
+                    ]
+                    progress_callback(evaluated_global, total_planned_global, partial)
+            if progress_callback and heap:
+                partial = [
+                    self._format_scored_set(combo_list, stats, score, idx, weights)
+                    for idx, (score, _, combo_list, stats) in enumerate(sorted(heap, key=lambda x: -x[0])[:limit])
+                ]
+                progress_callback(evaluated_global, total_planned_global, partial)
+        except TaskCancelledError:
+            raise
+
+        result = [(score, pieces, stats) for score, _, pieces, stats in heap]
+        result.sort(reverse=True, key=lambda x: x[0])
+        return [
+            self._format_scored_set(pieces, stats, score, idx, weights)
+            for idx, (score, pieces, stats) in enumerate(result[:limit])
+        ]
+
+    def _get_recommendations_deep_or_exhaustive(
+        self,
+        sets_to_process: List[Tuple[str, Dict[str, List[Dict]]]],
+        total_planned_global: int,
+        weights: Dict[str, float],
+        constraints: Dict[str, int],
+        limit: int,
+        progress_callback: Optional[Callable[[int, int, Optional[List[Dict]]], None]],
+        check_cancelled: Optional[Callable[[], bool]],
+    ) -> List[Dict]:
+        """Deep or legacy: exhaustive per-set, merge and return top N."""
+        all_scored_sets: List[Dict] = []
+        evaluated_so_far = 0
+
+        for set_type, pieces_by_armor_type in sets_to_process:
+            if check_cancelled is not None and check_cancelled():
+                raise TaskCancelledError()
+            total_this_set = 1
+            for armor_type in pieces_by_armor_type:
+                total_this_set *= len(pieces_by_armor_type[armor_type])
+
+            def make_progress_callback():
+                _evaluated_before = evaluated_so_far
+                _total_global = total_planned_global
+                def cb(eval_this: int, _total_this: int, partial_list: Optional[List[Dict]] = None) -> None:
+                    if progress_callback is not None:
+                        progress_callback(_evaluated_before + eval_this, _total_global, partial_list)
+                return cb
+
+            results = self.depth_first_recommendations(
+                pieces_by_armor_type,
+                weights,
+                constraints,
+                limit=limit,
+                timeout_seconds=None,
+                progress_callback=make_progress_callback() if progress_callback else None,
+                check_cancelled=check_cancelled,
+            )
+            for idx, (score, armor_set, aggregated_stats) in enumerate(results):
+                all_scored_sets.append(
+                    self._format_scored_set(armor_set, aggregated_stats, score, idx, weights)
+                )
+            evaluated_so_far += total_this_set
+            all_scored_sets.sort(key=lambda x: x['score'], reverse=True)
+            if progress_callback is not None:
+                progress_callback(evaluated_so_far, total_planned_global, all_scored_sets[:limit])
+
+        all_scored_sets.sort(key=lambda x: x['score'], reverse=True)
+        return all_scored_sets[:limit]
+
     def get_recommendations(
         self,
         weights: Dict[str, float],
         constraints: Dict[str, int],
         limit: int = 10,
+        search_mode: str = "broad",
+        base_set_id: Optional[str] = None,
         progress_callback: Optional[Callable[[int, int, Optional[List[Dict]]], None]] = None,
         check_cancelled: Optional[Callable[[], bool]] = None
     ) -> List[Dict]:
@@ -557,6 +770,10 @@ class RecommendationEngine:
         Returns:
             List of recommendation dictionaries
         """
+        mode = (search_mode or "broad").lower()
+        if mode not in ("broad", "deep"):
+            mode = "broad"
+
         # Set constraints
         self.constraint_manager.set_min_constraints(constraints)
 
@@ -599,7 +816,7 @@ class RecommendationEngine:
                 f"({original_piece_count} -> {filtered_piece_count})"
             )
 
-        # Build list of (set_type, pieces_by_armor_type) we will process and total_planned per set
+        # Build list of (set_type, pieces_by_armor_type) we will process
         sets_to_process: List[Tuple[str, Dict[str, List[Dict]]]] = []
         for set_type, pieces in sets_by_type.items():
             pieces_by_armor_type = {}
@@ -618,6 +835,14 @@ class RecommendationEngine:
                 continue
             sets_to_process.append((set_type, pieces_by_armor_type))
 
+        # Deep mode: restrict to the armor set implied by base_set_id
+        if mode == "deep" and base_set_id and base_set_id.strip():
+            base_armor_set = self._parse_armor_set_from_set_id(base_set_id)
+            if base_armor_set:
+                sets_to_process = [(st, pbat) for st, pbat in sets_to_process if st.lower().replace(' ', '_') == base_armor_set]
+                if not sets_to_process:
+                    logger.info("Deep search: no set matched base_set_id %s (parsed %s)", base_set_id, base_armor_set)
+
         total_planned_global = 0
         for _set_type, pbat in sets_to_process:
             n = 1
@@ -625,60 +850,22 @@ class RecommendationEngine:
                 n *= len(pbat[armor_type])
             total_planned_global += n
 
-        # Process each set with optimizations
-        all_scored_sets: List[Dict] = []
-        evaluated_so_far = 0
-
-        for set_type, pieces_by_armor_type in sets_to_process:
-            if check_cancelled is not None and check_cancelled():
-                logger.info("Task cancelled between sets")
-                raise TaskCancelledError()
-
-            total_this_set = 1
-            for armor_type in pieces_by_armor_type:
-                total_this_set *= len(pieces_by_armor_type[armor_type])
-
-            def make_progress_callback():
-                _evaluated_before = evaluated_so_far
-                _total_global = total_planned_global
-                def cb(
-                    evaluated_this: int,
-                    _total_this: int,
-                    partial_list: Optional[List[Dict]] = None,
-                ) -> None:
-                    if progress_callback is not None:
-                        progress_callback(
-                            _evaluated_before + evaluated_this,
-                            _total_global,
-                            partial_list,
-                        )
-                return cb
-
-            # Run to completion (no timeout)
-            results = self.depth_first_recommendations(
-                pieces_by_armor_type,
+        if mode == "broad":
+            return self._get_recommendations_broad(
+                sets_to_process,
+                total_planned_global,
                 weights,
                 constraints,
-                limit=limit,
-                timeout_seconds=None,
-                progress_callback=make_progress_callback() if progress_callback else None,
-                check_cancelled=check_cancelled
+                limit,
+                progress_callback,
+                check_cancelled,
             )
-
-            # Format results for this set
-            for idx, (score, armor_set, aggregated_stats) in enumerate(results):
-                all_scored_sets.append(
-                    self._format_scored_set(armor_set, aggregated_stats, score, idx, weights)
-                )
-
-            evaluated_so_far += total_this_set
-
-            # Merge and take top N, then report partial results
-            all_scored_sets.sort(key=lambda x: x['score'], reverse=True)
-            partial = all_scored_sets[:limit]
-            if progress_callback is not None:
-                progress_callback(evaluated_so_far, total_planned_global, partial)
-
-        # Sort by score (descending) and return top N
-        all_scored_sets.sort(key=lambda x: x['score'], reverse=True)
-        return all_scored_sets[:limit]
+        return self._get_recommendations_deep_or_exhaustive(
+            sets_to_process,
+            total_planned_global,
+            weights,
+            constraints,
+            limit,
+            progress_callback,
+            check_cancelled,
+        )

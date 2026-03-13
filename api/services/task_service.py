@@ -41,6 +41,8 @@ class TaskService:
         constraints: Dict[str, int],
         limit: int = 10,
         data_file: Optional[str] = None,
+        search_mode: str = "broad",
+        base_set_id: Optional[str] = None,
     ) -> str:
         """
         Create a new recommendation task. Cancels any currently running task and
@@ -76,6 +78,8 @@ class TaskService:
             "weights": json.dumps(weights),
             "constraints": json.dumps(constraints),
             "limit": limit,
+            "search_mode": search_mode,
+            "base_set_id": base_set_id or "",
             "status": "pending",
             "created_at": datetime.utcnow().isoformat(),
         }
@@ -90,6 +94,8 @@ class TaskService:
             "weights": json.dumps(weights),
             "constraints": json.dumps(constraints),
             "limit": limit,
+            "search_mode": search_mode,
+            "base_set_id": base_set_id or "",
         }
         if data_file is not None:
             task_data["data_file"] = data_file

@@ -332,6 +332,67 @@
   transform: translateY(0);
 }
 
+.results-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  justify-content: center;
+  align-items: center;
+  margin-top: 1rem;
+}
+
+.broad-search-button,
+.deep-search-button {
+  padding: 0.5rem 1rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  border-radius: 6px;
+  border: 1px solid #ccc;
+  background: #f5f5f5;
+  cursor: pointer;
+  font: inherit;
+}
+
+.broad-search-button:hover:not(:disabled),
+.deep-search-button:hover:not(:disabled) {
+  background: #eee;
+  border-color: #999;
+}
+
+.broad-search-button:disabled,
+.deep-search-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.select-base-button {
+  flex-shrink: 0;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.875rem;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  background: #fafafa;
+  cursor: pointer;
+  font: inherit;
+}
+
+.select-base-button:hover {
+  background: #eee;
+  border-color: #ccc;
+}
+
+.select-base-button.select-base-selected,
+.select-base-button[aria-pressed="true"] {
+  background: #1a7f37;
+  color: white;
+  border-color: #1a7f37;
+}
+
+.select-base-button:focus-visible {
+  outline: 2px solid #2196f3;
+  outline-offset: 2px;
+}
+
 /* Results two-pane layout */
 .results-two-pane {
   display: grid;

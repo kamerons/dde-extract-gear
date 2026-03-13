@@ -10,7 +10,7 @@ from shared.models import (
     RecommendationRequest,
     RecommendationResponse,
     Recommendation,
-    RecommendationPiece
+    RecommendationPiece,
 )
 from shared.recommendation_engine import RecommendationEngine, TooManyCombinationsError
 from api.config import Config
@@ -165,6 +165,10 @@ async def post_recommendations(request: RecommendationRequest):
     weights = request.weights or {}
     constraints = request.constraints.min if request.constraints else {}
     limit = request.limit or 10
+    search_mode = (request.search_mode or "broad").lower()
+    if search_mode not in ("broad", "deep"):
+        search_mode = "broad"
+    base_set_id = request.base_set_id
     data_file = None
     if request.data_file:
         data_file = _normalize_data_file(request.data_file)
@@ -175,7 +179,15 @@ async def post_recommendations(request: RecommendationRequest):
             )
 
     # Log request
-    logger.info(f"New POST request received: weights={weights}, constraints={constraints}, limit={limit}, data_file={data_file}")
+    logger.info(
+        "New POST request received: weights=%s, constraints=%s, limit=%s, data_file=%s, search_mode=%s, base_set_id=%s",
+        weights,
+        constraints,
+        limit,
+        data_file,
+        search_mode,
+        base_set_id,
+    )
 
     # Create task
     try:
@@ -184,6 +196,8 @@ async def post_recommendations(request: RecommendationRequest):
             constraints=constraints,
             limit=limit,
             data_file=data_file,
+            search_mode=search_mode,
+            base_set_id=base_set_id,
         )
     except Exception as e:
         logger.error(f"Failed to create task: {e}")

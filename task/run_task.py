@@ -507,8 +507,17 @@ def run_recommendation(redis_client: redis.Redis, config: Config, task_data: Dic
     weights = json.loads(task_data["weights"])
     constraints = json.loads(task_data["constraints"])
     limit = int(task_data["limit"])
+    raw_search_mode = str(task_data.get("search_mode", "broad")).lower()
+    search_mode = raw_search_mode if raw_search_mode in ("broad", "deep") else "broad"
+    base_set_id = task_data.get("base_set_id") or None
     data_file = _recommendation_data_file(config, task_data)
-    logger.info("Processing task %s (data_file=%s)", task_id, data_file)
+    logger.info(
+        "Processing task %s (data_file=%s, search_mode=%s, base_set_id=%s)",
+        task_id,
+        data_file,
+        search_mode,
+        base_set_id,
+    )
     redis_client.setex(CURRENT_TASK_KEY, CURRENT_TASK_EXPIRY, task_id)
     update_task_status(redis_client, task_id, "processing")
 
@@ -528,6 +537,8 @@ def run_recommendation(redis_client: redis.Redis, config: Config, task_data: Dic
             weights=weights,
             constraints=constraints,
             limit=limit,
+            search_mode=search_mode,
+            base_set_id=base_set_id,
             progress_callback=progress_callback,
             check_cancelled=check_cancelled,
         )

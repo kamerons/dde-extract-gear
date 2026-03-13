@@ -3,6 +3,8 @@ import type {
   Recommendation,
   RecommendationPiece,
   RecommendationTaskResult,
+  SearchBaseInfo,
+  SearchMode,
 } from '../types';
 import { ALL_STATS } from '../constants';
 
@@ -96,19 +98,26 @@ export async function submitTaskWithWeights(
   weights: Record<string, number>,
   constraints: { min: Record<string, number> },
   dataFile?: string,
-  limit: number = 10
+  limit: number = 10,
+  searchMode: SearchMode = 'broad',
+  baseInfo?: SearchBaseInfo | null
 ): Promise<string> {
+  const body: Record<string, unknown> = {
+    weights,
+    constraints: { min: constraints.min ?? {} },
+    limit,
+    search_mode: searchMode,
+    ...(dataFile ? { data_file: dataFile } : {}),
+  };
+  if (baseInfo?.setId) {
+    body.base_set_id = baseInfo.setId;
+  }
   const response = await fetch(`${API_BASE_URL}/api/recommendations`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      weights,
-      constraints: { min: constraints.min ?? {} },
-      limit,
-      ...(dataFile ? { data_file: dataFile } : {}),
-    }),
+    body: JSON.stringify(body),
   });
 
   if (!response.ok) {
@@ -156,23 +165,31 @@ export async function submitInitialPreferences(
  * Submit initial build preferences to the server (async version).
  * Returns a task_id that can be polled for results.
  * @param dataFile - Optional filename from data/collected/ (e.g. "sample.json")
+ * @param searchMode - "broad" (default) or "deep"
+ * @param baseInfo - For deep search, the selected base recommendation (setId).
  */
 export async function submitInitialPreferencesAsync(
   preferences: BuildPreferences,
-  dataFile?: string
+  dataFile?: string,
+  searchMode: SearchMode = 'broad',
+  baseInfo?: SearchBaseInfo | null
 ): Promise<string> {
   const requestBody = convertPreferencesToRequest(preferences);
-
+  const body: Record<string, unknown> = {
+    ...requestBody,
+    limit: 10,
+    search_mode: searchMode,
+    ...(dataFile ? { data_file: dataFile } : {}),
+  };
+  if (baseInfo?.setId) {
+    body.base_set_id = baseInfo.setId;
+  }
   const response = await fetch(`${API_BASE_URL}/api/recommendations`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      ...requestBody,
-      limit: 10,
-      ...(dataFile ? { data_file: dataFile } : {}),
-    }),
+    body: JSON.stringify(body),
   });
 
   if (!response.ok) {

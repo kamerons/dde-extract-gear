@@ -41,6 +41,8 @@ class RecommendationProcessor:
         weights: Dict[str, float],
         constraints: Dict[str, int],
         limit: int = 10,
+        search_mode: str = "broad",
+        base_set_id: Optional[str] = None,
         progress_callback: Optional[Callable[[int, int, Optional[Dict]], None]] = None,
         check_cancelled: Optional[Callable[[], bool]] = None
     ) -> Dict:
@@ -51,6 +53,8 @@ class RecommendationProcessor:
             weights: Dictionary mapping stat names to weights
             constraints: Dictionary mapping stat names to minimum values
             limit: Maximum number of recommendations to return
+            search_mode: Search mode to use ("broad" or "deep")
+            base_set_id: Optional identifier of a base recommendation for deep search
             progress_callback: Optional callback (evaluated, total_planned, partial_results).
                 partial_results is {"recommendations": [...], "count": N} or None.
             check_cancelled: Optional callback; if it returns True, abort and raise TaskCancelledError.
@@ -65,7 +69,18 @@ class RecommendationProcessor:
         """
         self._load_inventory()
 
-        logger.info(f"Processing recommendation: weights={weights}, constraints={constraints}, limit={limit}")
+        mode = (search_mode or "broad").lower()
+        if mode not in ("broad", "deep"):
+            mode = "broad"
+
+        logger.info(
+            "Processing recommendation: weights=%s, constraints=%s, limit=%s, search_mode=%s, base_set_id=%s",
+            weights,
+            constraints,
+            limit,
+            mode,
+            base_set_id,
+        )
 
         def engine_progress_callback(
             evaluated: int,
@@ -87,8 +102,10 @@ class RecommendationProcessor:
                 weights=weights,
                 constraints=constraints,
                 limit=limit,
+                search_mode=mode,
+                base_set_id=base_set_id,
                 progress_callback=engine_progress_callback,
-                check_cancelled=check_cancelled
+                check_cancelled=check_cancelled,
             )
 
             # Formula constants for UI: reference scales and description

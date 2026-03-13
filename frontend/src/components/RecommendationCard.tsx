@@ -9,6 +9,8 @@ interface RecommendationCardProps {
   rank: number;
   onCompareWith?: () => void;
   isCompareSelected?: boolean;
+  onSelectAsBase?: () => void;
+  isBaseSelected?: boolean;
   originalScore?: number;
   originalRank?: number;
 }
@@ -42,6 +44,8 @@ export function RecommendationCard({
   rank,
   onCompareWith,
   isCompareSelected,
+  onSelectAsBase,
+  isBaseSelected,
   originalScore,
   originalRank,
 }: RecommendationCardProps) {
@@ -73,6 +77,17 @@ export function RecommendationCard({
           <h2>{armorSetName}</h2>
           <p className="recommendation-set-id">Set ID: {recommendation.set_id}</p>
         </div>
+        {onSelectAsBase != null && (
+          <button
+            type="button"
+            className={`select-base-button ${isBaseSelected ? 'select-base-selected' : ''}`}
+            onClick={onSelectAsBase}
+            title={isBaseSelected ? 'Selected as base for deep search' : 'Use as base for deep search'}
+            aria-pressed={isBaseSelected}
+          >
+            {isBaseSelected ? 'Base selected' : 'Use as base'}
+          </button>
+        )}
         {onCompareWith != null && (
           <button
             type="button"

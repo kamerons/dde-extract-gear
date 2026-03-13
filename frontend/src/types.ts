@@ -19,6 +19,13 @@ export const STAT_TYPES = [
 
 export type StatType = (typeof STAT_TYPES)[number];
 
+export type SearchMode = 'broad' | 'deep';
+
+/** Optional base for deep search (setId from a prior recommendation). */
+export interface SearchBaseInfo {
+  setId: string;
+}
+
 export interface BuildPreferences {
   maximizeStats: StatType[];
   ignoreStats: StatType[];
