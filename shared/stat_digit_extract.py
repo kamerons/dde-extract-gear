@@ -15,7 +15,7 @@ WHITE_VALUE_THRESHOLD = 180
 # --- Stat digit ROI and behavior ---
 AREA_THRESHOLD = 30
 LOW_Y = 31
-LOW_X = 11
+LOW_X = 8
 HIGH_Y = 55
 HIGH_X = 51
 DIGIT_SIZE = 56

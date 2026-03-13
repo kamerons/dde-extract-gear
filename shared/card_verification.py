@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 from shared.armor_sets import SET_TYPES
 from shared.extract_regions import compute_boxes
 from shared.level_digit_extract import extract_level_clusters
+from shared.stat_digit_extract import extract_digits as extract_stat_digits
 from shared.stat_normalizer import StatNormalizer
 
 # Input size for icon and digit models (matches training)
@@ -120,6 +121,7 @@ def verify_card(
     level_merged: np.ndarray | None = None
     stat_crops: list[np.ndarray] = []
     stat_crops_56: list[np.ndarray] = []
+    pred_indices_for_debug: np.ndarray | None = None
 
     # Stat types and values
     icon_path = _resolve_icon_model_path(data_dir) if icon_model_path is None else Path(icon_model_path)
@@ -134,6 +136,7 @@ def verify_card(
                 X = np.stack(stat_crops_56).astype(np.float32) / 255.0
                 preds = icon_model.predict(X, verbose=0)
                 pred_indices = np.argmax(preds, axis=-1)
+                pred_indices_for_debug = pred_indices
                 num_classes = preds.shape[-1]
                 for i, idx in enumerate(pred_indices):
                     idx = int(idx)
@@ -222,6 +225,28 @@ def verify_card(
             debug["region_stat_crops"] = [_encode_image_b64(c) for c in stat_crops]
         if stat_crops_56:
             debug["preprocess_stat_crops"] = [_encode_image_b64(c) for c in stat_crops_56]
+        if pred_indices_for_debug is not None and stat_crops and stat_crops_56:
+            stat_debug: dict[str, dict[str, Any]] = {}
+            seen_types: set[str] = set()
+            for i in range(min(len(pred_indices_for_debug), len(stat_crops), len(stat_crops_56))):
+                idx = int(pred_indices_for_debug[i])
+                if idx >= len(ICON_CLASS_NAMES):
+                    continue
+                stat_type = ICON_CLASS_NAMES[idx]
+                if stat_type == "none" or stat_type in seen_types:
+                    continue
+                seen_types.add(stat_type)
+                bgr_crop = stat_crops[i][:, :, ::-1].copy()
+                digit_imgs = extract_stat_digits(bgr_crop)
+                digit_b64_list = [
+                    _encode_image_b64(d[:, :, ::-1]) for d in digit_imgs
+                ]
+                stat_debug[stat_type] = {
+                    "region": _encode_image_b64(stat_crops[i]),
+                    "preprocess": _encode_image_b64(stat_crops_56[i]),
+                    "digit_crops": digit_b64_list,
+                }
+            debug["stat_debug"] = stat_debug
 
     return VerificationResult(
         armor_set=armor_set,

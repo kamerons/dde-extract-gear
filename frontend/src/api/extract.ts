@@ -206,6 +206,8 @@ export interface VerificationDebug {
   ocr_set_error?: string;
   /** Error message if OCR failed for the level region (when using OCR fallback). */
   ocr_level_error?: string;
+  /** Per-stat debug: region, preprocess, and digit crops (base64 PNGs) keyed by stat type. */
+  stat_debug?: Record<string, { region: string; preprocess: string; digit_crops: string[] }>;
 }
 
 /** Verification result when task completes (from GET /api/tasks/{task_id} results). */

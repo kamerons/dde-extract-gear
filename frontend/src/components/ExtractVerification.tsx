@@ -40,6 +40,8 @@ function dataUrlFromBase64(base64: string): string {
   return `data:image/png;base64,${base64}`;
 }
 
+type SelectedDetail = 'armor_set' | 'level' | string | null;
+
 export function ExtractVerification() {
   const [items, setItems] = useState<VerificationItem[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -47,8 +49,25 @@ export function ExtractVerification() {
   const [result, setResult] = useState<VerificationResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [statDisplayOrder, setStatDisplayOrder] = useState<string[]>(STAT_DISPLAY_ORDER_DEFAULT);
+  const [selectedDetail, setSelectedDetail] = useState<SelectedDetail>(null);
+  const [imageFilterPrefix, setImageFilterPrefix] = useState('');
 
-  const currentItem = items.length > 0 ? items[currentIndex] ?? null : null;
+  const filteredItems =
+    imageFilterPrefix.trim() === ''
+      ? items
+      : items.filter((item) => item.filename.startsWith(imageFilterPrefix.trim()));
+
+  const effectiveIndex =
+    filteredItems.length > 0
+      ? Math.min(currentIndex, filteredItems.length - 1)
+      : 0;
+  const currentItem = filteredItems.length > 0 ? filteredItems[effectiveIndex] ?? null : null;
+
+  useEffect(() => {
+    if (filteredItems.length > 0 && currentIndex >= filteredItems.length) {
+      setCurrentIndex(filteredItems.length - 1);
+    }
+  }, [filteredItems.length, currentIndex]);
 
   useEffect(() => {
     let cancelled = false;
@@ -123,15 +142,19 @@ export function ExtractVerification() {
     }
   }, [currentItem?.subdir, currentItem?.filename, runVerification]);
 
+  useEffect(() => {
+    setSelectedDetail(null);
+  }, [currentItem?.subdir, currentItem?.filename]);
+
   const goPrev = useCallback(() => {
-    if (items.length === 0) return;
-    setCurrentIndex((i) => (i <= 0 ? items.length - 1 : i - 1));
-  }, [items.length]);
+    if (filteredItems.length === 0) return;
+    setCurrentIndex((i) => (i <= 0 ? filteredItems.length - 1 : i - 1));
+  }, [filteredItems.length]);
 
   const goNext = useCallback(() => {
-    if (items.length === 0) return;
-    setCurrentIndex((i) => (i >= items.length - 1 ? 0 : i + 1));
-  }, [items.length]);
+    if (filteredItems.length === 0) return;
+    setCurrentIndex((i) => (i >= filteredItems.length - 1 ? 0 : i + 1));
+  }, [filteredItems.length]);
 
   return (
     <div className="extract-verification">
@@ -153,59 +176,56 @@ export function ExtractVerification() {
       {items.length > 0 && (
         <>
           <div className="extract-verification-nav">
+            <label className="extract-verification-filter">
+              <span className="extract-verification-filter-label">Prefix:</span>
+              <input
+                type="text"
+                className="extract-verification-filter-input"
+                value={imageFilterPrefix}
+                onChange={(e) => setImageFilterPrefix(e.target.value)}
+                placeholder="e.g. run1"
+                aria-label="Filter images by filename prefix"
+              />
+            </label>
             <button
               type="button"
               onClick={goPrev}
-              disabled={loading}
+              disabled={loading || filteredItems.length === 0}
               aria-label="Previous screenshot"
             >
               Previous
             </button>
             <span className="extract-verification-counter">
-              {currentIndex + 1} / {items.length}
+              {filteredItems.length > 0 ? `${effectiveIndex + 1} / ${filteredItems.length}` : '0 / 0'}
             </span>
             <select
               className="extract-verification-jump"
-              value={currentIndex}
+              value={filteredItems.length > 0 ? effectiveIndex : ''}
               onChange={(e) => setCurrentIndex(Number(e.target.value))}
-              disabled={loading}
+              disabled={loading || filteredItems.length === 0}
               aria-label="Jump to image"
             >
-              {items.map((item, i) => (
-                <option key={`${item.subdir}-${item.filename}`} value={i}>
-                  {item.subdir.split('/').pop()} / {item.filename}
-                </option>
-              ))}
+              {filteredItems.length === 0 ? (
+                <option value="">No images match</option>
+              ) : (
+                filteredItems.map((item, i) => (
+                  <option key={`${item.subdir}-${item.filename}`} value={i}>
+                    {item.subdir.split('/').pop()} / {item.filename}
+                  </option>
+                ))
+              )}
             </select>
             <button
               type="button"
               onClick={goNext}
-              disabled={loading}
+              disabled={loading || filteredItems.length === 0}
               aria-label="Next screenshot"
             >
               Next
             </button>
           </div>
           <div className="extract-verification-layout">
-            <div className="extract-verification-image-wrap">
-              {currentItem && (
-                <>
-                  <img
-                    src={
-                      result?.debug?.region_card
-                        ? dataUrlFromBase64(result.debug.region_card)
-                        : getScreenshotUrl(currentItem.filename, currentItem.subdir, { crop: true })
-                    }
-                    alt="Card crop"
-                    className="extract-verification-image"
-                  />
-                  <p className="extract-verification-caption">
-                    {currentItem.subdir.split('/').pop()} / {currentItem.filename}
-                  </p>
-                </>
-              )}
-            </div>
-            <div className="extract-verification-result">
+            <div className="extract-verification-left">
               {loading && <p className="extract-verification-loading">Verifying…</p>}
               {!loading && error && currentItem && (
                 <p className="extract-verification-error" role="alert">
@@ -213,168 +233,177 @@ export function ExtractVerification() {
                 </p>
               )}
               {!loading && result && (
-                <div className="extract-verification-result-panel">
-                  {result.error && (
-                    <p className="extract-verification-partial-error" role="alert">
-                      {result.error}
-                    </p>
-                  )}
-                  <dl className="extract-verification-dl">
-                    <dt>Armor set</dt>
-                    <dd>{result.armor_set ?? '—'}</dd>
-                    <dt>Level</dt>
-                    <dd>
-                      {result.current_level != null && result.max_level != null
-                        ? `${result.current_level} / ${result.max_level}`
-                        : result.current_level != null
-                          ? String(result.current_level)
-                          : '—'}
-                    </dd>
-                  </dl>
-                  {(statDisplayOrder.length > 0 || Object.keys(result.stats).length > 0) && (
-                    <>
-                      <h3 className="extract-verification-stats-heading">Stats</h3>
-                      <table className="extract-verification-stats-table">
-                        <thead>
-                          <tr>
-                            <th>Stat</th>
-                            <th>Value</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {(statDisplayOrder.length > 0 ? statDisplayOrder : Object.keys(result.stats)).map(
-                            (name) => (
-                              <tr key={name}>
-                                <td>{name}</td>
-                                <td>
-                                  {result.stats[name] !== undefined ? result.stats[name] : '\u2014'}
-                                </td>
-                              </tr>
-                            )
-                          )}
-                        </tbody>
-                      </table>
-                    </>
-                  )}
-                  {result.debug && (
-                    <div className="extract-verification-debug">
-                      <h3 className="extract-verification-debug-heading">Regions used</h3>
-                      <div className="extract-verification-debug-regions">
-                        {result.debug.region_set && (
-                          <figure className="extract-verification-debug-figure">
-                            <img
-                              src={dataUrlFromBase64(result.debug.region_set)}
-                              alt="Set region (raw)"
-                              className="extract-verification-debug-img"
-                            />
-                            <figcaption>Set (raw)</figcaption>
-                          </figure>
-                        )}
-                        {result.debug.region_level && (
-                          <figure className="extract-verification-debug-figure">
-                            <img
-                              src={dataUrlFromBase64(result.debug.region_level)}
-                              alt="Level region (merged)"
-                              className="extract-verification-debug-img"
-                            />
-                            <figcaption>Level (merged)</figcaption>
-                          </figure>
-                        )}
-                        {result.debug.region_stat_crops && result.debug.region_stat_crops.length > 0 && (
-                          <figure className="extract-verification-debug-figure">
-                            <div className="extract-verification-debug-stat-grid">
-                              {result.debug.region_stat_crops.map((b64, i) => (
-                                <img
-                                  key={i}
-                                  src={dataUrlFromBase64(b64)}
-                                  alt={`Stat region ${i + 1}`}
-                                  className="extract-verification-debug-img extract-verification-debug-stat-cell"
-                                />
-                              ))}
-                            </div>
-                            <figcaption>Stat crops (raw)</figcaption>
-                          </figure>
-                        )}
-                      </div>
-                      <h3 className="extract-verification-debug-heading">Preprocessing</h3>
-                      <div className="extract-verification-debug-preprocess">
-                        {result.debug.preprocess_set && (
-                          <figure className="extract-verification-debug-figure">
-                            <img
-                              src={dataUrlFromBase64(result.debug.preprocess_set)}
-                              alt="Set (preprocessed)"
-                              className="extract-verification-debug-img"
-                            />
-                            <figcaption>Set (preprocessed)</figcaption>
-                          </figure>
-                        )}
-                        {result.debug.preprocess_level && (
-                          <figure className="extract-verification-debug-figure">
-                            <img
-                              src={dataUrlFromBase64(result.debug.preprocess_level)}
-                              alt="Level (preprocessed, legacy cyan)"
-                              className="extract-verification-debug-img"
-                            />
-                            <figcaption>Level (preprocessed, legacy cyan)</figcaption>
-                          </figure>
-                        )}
-                        {result.debug.preprocess_stat_crops && result.debug.preprocess_stat_crops.length > 0 && (
-                          <figure className="extract-verification-debug-figure">
-                            <div className="extract-verification-debug-stat-grid">
-                              {result.debug.preprocess_stat_crops.map((b64, i) => (
-                                <img
-                                  key={i}
-                                  src={dataUrlFromBase64(b64)}
-                                  alt={`Stat preprocess ${i + 1}`}
-                                  className="extract-verification-debug-img extract-verification-debug-stat-cell"
-                                />
-                              ))}
-                            </div>
-                            <figcaption>Stat crops (56x56)</figcaption>
-                          </figure>
-                        )}
-                      </div>
-                      {(result.debug.ocr_set !== undefined ||
-                        result.debug.ocr_level !== undefined ||
-                        result.debug.level_via_digit !== undefined ||
-                        result.debug.ocr_set_error ||
-                        result.debug.ocr_level_error) && (
+                <>
+                  <div className="extract-verification-left-top">
+                    <div className="extract-verification-stats-card">
+                      {result.error && (
+                        <p className="extract-verification-partial-error" role="alert">
+                          {result.error}
+                        </p>
+                      )}
+                      <dl className="extract-verification-dl">
+                        <div
+                          className={`extract-verification-dl-term${selectedDetail === 'armor_set' ? ' extract-verification-dl-term--selected' : ''}`}
+                          onClick={() => setSelectedDetail('armor_set')}
+                          onKeyDown={(e) => e.key === 'Enter' && setSelectedDetail('armor_set')}
+                          role="button"
+                          tabIndex={0}
+                          aria-pressed={selectedDetail === 'armor_set'}
+                        >
+                          <dt>Armor set</dt>
+                          <dd>{result.armor_set ?? '\u2014'}</dd>
+                        </div>
+                        <div
+                          className={`extract-verification-dl-term${selectedDetail === 'level' ? ' extract-verification-dl-term--selected' : ''}`}
+                          onClick={() => setSelectedDetail('level')}
+                          onKeyDown={(e) => e.key === 'Enter' && setSelectedDetail('level')}
+                          role="button"
+                          tabIndex={0}
+                          aria-pressed={selectedDetail === 'level'}
+                        >
+                          <dt>Level</dt>
+                          <dd>
+                            {result.current_level != null && result.max_level != null
+                              ? `${result.current_level} / ${result.max_level}`
+                              : result.current_level != null
+                                ? String(result.current_level)
+                                : '\u2014'}
+                          </dd>
+                        </div>
+                      </dl>
+                      {(statDisplayOrder.length > 0 || Object.keys(result.stats).length > 0) && (
                         <>
-                          <h3 className="extract-verification-debug-heading">Set (OCR) &amp; Level</h3>
+                          <h3 className="extract-verification-stats-heading">Stats</h3>
+                          <table className="extract-verification-stats-table">
+                            <thead>
+                              <tr>
+                                <th>Stat</th>
+                                <th>Value</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {(statDisplayOrder.length > 0 ? statDisplayOrder : Object.keys(result.stats)).map(
+                                (name) => (
+                                  <tr
+                                    key={name}
+                                    className={selectedDetail === name ? 'extract-verification-stat-row--selected' : ''}
+                                    onClick={() => setSelectedDetail(name)}
+                                    role="button"
+                                    tabIndex={0}
+                                    onKeyDown={(e) => e.key === 'Enter' && setSelectedDetail(name)}
+                                    aria-pressed={selectedDetail === name}
+                                  >
+                                    <td>{name}</td>
+                                    <td>
+                                      {result.stats[name] !== undefined ? result.stats[name] : '\u2014'}
+                                    </td>
+                                  </tr>
+                                )
+                              )}
+                            </tbody>
+                          </table>
+                        </>
+                      )}
+                    </div>
+                    <div className="extract-verification-debug-panel">
+                      {selectedDetail == null && (
+                        <p className="extract-verification-debug-panel-empty">
+                          Click a stat or region to see debug info.
+                        </p>
+                      )}
+                      {selectedDetail === 'armor_set' && result.debug && (
+                        <>
+                          <h3 className="extract-verification-debug-heading">Region used</h3>
+                          <div className="extract-verification-debug-regions">
+                            {result.debug.region_set && (
+                              <figure className="extract-verification-debug-figure">
+                                <img
+                                  src={dataUrlFromBase64(result.debug.region_set)}
+                                  alt="Set region (raw)"
+                                  className="extract-verification-debug-img"
+                                />
+                                <figcaption>Set (raw)</figcaption>
+                              </figure>
+                            )}
+                          </div>
+                          <h3 className="extract-verification-debug-heading">Preprocessed</h3>
+                          <div className="extract-verification-debug-preprocess">
+                            {result.debug.preprocess_set && (
+                              <figure className="extract-verification-debug-figure">
+                                <img
+                                  src={dataUrlFromBase64(result.debug.preprocess_set)}
+                                  alt="Set (preprocessed)"
+                                  className="extract-verification-debug-img"
+                                />
+                                <figcaption>Set (preprocessed)</figcaption>
+                              </figure>
+                            )}
+                          </div>
+                          <h3 className="extract-verification-debug-heading">Set (OCR)</h3>
                           <div className="extract-verification-debug-ocr">
                             {result.debug.ocr_set_error && (
                               <p className="extract-verification-debug-ocr-line extract-verification-debug-ocr-error" role="alert">
-                                <span className="extract-verification-debug-ocr-label">Set OCR error:</span>{' '}
+                                <span className="extract-verification-debug-ocr-label">OCR error:</span>{' '}
                                 {result.debug.ocr_set_error}
                               </p>
                             )}
                             {result.debug.ocr_set !== undefined && (
                               <p className="extract-verification-debug-ocr-line">
-                                <span className="extract-verification-debug-ocr-label">Set (OCR):</span>{' '}
+                                <span className="extract-verification-debug-ocr-label">OCR:</span>{' '}
                                 <code className="extract-verification-debug-ocr-value">
                                   {result.debug.ocr_set === '' ? '(empty)' : result.debug.ocr_set}
                                 </code>
                               </p>
                             )}
+                          </div>
+                        </>
+                      )}
+                      {selectedDetail === 'level' && result.debug && (
+                        <>
+                          <h3 className="extract-verification-debug-heading">Region used</h3>
+                          <div className="extract-verification-debug-regions">
+                            {result.debug.region_level && (
+                              <figure className="extract-verification-debug-figure">
+                                <img
+                                  src={dataUrlFromBase64(result.debug.region_level)}
+                                  alt="Level region (merged)"
+                                  className="extract-verification-debug-img"
+                                />
+                                <figcaption>Level (merged)</figcaption>
+                              </figure>
+                            )}
+                          </div>
+                          <h3 className="extract-verification-debug-heading">Preprocessed</h3>
+                          <div className="extract-verification-debug-preprocess">
+                            {result.debug.preprocess_level && (
+                              <figure className="extract-verification-debug-figure">
+                                <img
+                                  src={dataUrlFromBase64(result.debug.preprocess_level)}
+                                  alt="Level (preprocessed)"
+                                  className="extract-verification-debug-img"
+                                />
+                                <figcaption>Level (preprocessed)</figcaption>
+                              </figure>
+                            )}
+                          </div>
+                          <h3 className="extract-verification-debug-heading">Level info</h3>
+                          <div className="extract-verification-debug-ocr">
                             {result.debug.level_via_digit !== undefined && (
                               <p className="extract-verification-debug-ocr-line">
-                                <span className="extract-verification-debug-ocr-label">Level:</span>{' '}
+                                <span className="extract-verification-debug-ocr-label">Source:</span>{' '}
                                 {result.debug.level_via_digit
-                                  ? 'from digit detector (clusters + model)'
-                                  : 'from OCR fallback'}
+                                  ? 'digit detector (clusters + model)'
+                                  : 'OCR fallback'}
                               </p>
                             )}
-                            {(result.debug.level_via_digit !== undefined ||
-                              result.debug.ocr_level !== undefined) && (
-                              <p className="extract-verification-debug-ocr-line">
-                                <span className="extract-verification-debug-ocr-label">Parsed level:</span>{' '}
-                                {result.current_level != null && result.max_level != null
-                                  ? `${result.current_level} / ${result.max_level}`
-                                  : result.current_level != null
-                                    ? String(result.current_level)
-                                    : '(none)'}
-                              </p>
-                            )}
+                            <p className="extract-verification-debug-ocr-line">
+                              <span className="extract-verification-debug-ocr-label">Parsed level:</span>{' '}
+                              {result.current_level != null && result.max_level != null
+                                ? `${result.current_level} / ${result.max_level}`
+                                : result.current_level != null
+                                  ? String(result.current_level)
+                                  : '(none)'}
+                            </p>
                             {result.debug.ocr_level_error && (
                               <p className="extract-verification-debug-ocr-line extract-verification-debug-ocr-error" role="alert">
                                 <span className="extract-verification-debug-ocr-label">Level OCR error:</span>{' '}
@@ -392,9 +421,139 @@ export function ExtractVerification() {
                           </div>
                         </>
                       )}
+                      {selectedDetail !== null &&
+                        selectedDetail !== 'armor_set' &&
+                        selectedDetail !== 'level' &&
+                        (result.debug?.stat_debug?.[selectedDetail] ? (
+                          <>
+                            <h3 className="extract-verification-debug-heading">Region used</h3>
+                            <figure className="extract-verification-debug-figure">
+                              <img
+                                src={dataUrlFromBase64(result.debug.stat_debug[selectedDetail].region)}
+                                alt={`${selectedDetail} region`}
+                                className="extract-verification-debug-img"
+                              />
+                              <figcaption>{selectedDetail} (raw)</figcaption>
+                            </figure>
+                            <h3 className="extract-verification-debug-heading">Preprocessed (56x56)</h3>
+                            <figure className="extract-verification-debug-figure">
+                              <img
+                                src={dataUrlFromBase64(result.debug.stat_debug[selectedDetail].preprocess)}
+                                alt={`${selectedDetail} preprocessed`}
+                                className="extract-verification-debug-img"
+                              />
+                              <figcaption>{selectedDetail} (56x56)</figcaption>
+                            </figure>
+                            <p className="extract-verification-debug-ocr-line">
+                              <span className="extract-verification-debug-ocr-label">Value:</span>{' '}
+                              {result.stats[selectedDetail] !== undefined ? result.stats[selectedDetail] : '\u2014'}
+                            </p>
+                            <h3 className="extract-verification-debug-heading">Digit crops</h3>
+                            <div className="extract-verification-debug-digit-crops">
+                              {result.debug.stat_debug[selectedDetail].digit_crops.map((b64, i) => (
+                                <img
+                                  key={i}
+                                  src={dataUrlFromBase64(b64)}
+                                  alt={`Digit ${i + 1}`}
+                                />
+                              ))}
+                              {result.debug.stat_debug[selectedDetail].digit_crops.length === 0 && (
+                                <span className="extract-verification-debug-panel-empty">No digits extracted</span>
+                              )}
+                            </div>
+                          </>
+                        ) : (
+                          <p className="extract-verification-debug-panel-empty">
+                            No debug images for this stat.
+                          </p>
+                        ))}
+                    </div>
+                  </div>
+                  {result.debug && (
+                    <div className="extract-verification-regions-strip">
+                      {result.debug.region_card && (
+                        <button
+                          type="button"
+                          className={`extract-verification-region-thumb${selectedDetail === null ? ' extract-verification-region-thumb--selected' : ''}`}
+                          onClick={() => setSelectedDetail(null)}
+                          aria-label="Card crop"
+                          aria-pressed={selectedDetail === null}
+                          title="Card"
+                        >
+                          <img src={dataUrlFromBase64(result.debug.region_card)} alt="" />
+                          <span className="extract-verification-region-thumb-caption">Card</span>
+                        </button>
+                      )}
+                      {result.debug.region_set && (
+                        <button
+                          type="button"
+                          className={`extract-verification-region-thumb${selectedDetail === 'armor_set' ? ' extract-verification-region-thumb--selected' : ''}`}
+                          onClick={() => setSelectedDetail('armor_set')}
+                          aria-label="Set region"
+                          aria-pressed={selectedDetail === 'armor_set'}
+                          title="Armor set"
+                        >
+                          <img src={dataUrlFromBase64(result.debug.region_set)} alt="" />
+                          <span className="extract-verification-region-thumb-caption">Set</span>
+                        </button>
+                      )}
+                      {result.debug.region_level && (
+                        <button
+                          type="button"
+                          className={`extract-verification-region-thumb${selectedDetail === 'level' ? ' extract-verification-region-thumb--selected' : ''}`}
+                          onClick={() => setSelectedDetail('level')}
+                          aria-label="Level region"
+                          aria-pressed={selectedDetail === 'level'}
+                          title="Level"
+                        >
+                          <img src={dataUrlFromBase64(result.debug.region_level)} alt="" />
+                          <span className="extract-verification-region-thumb-caption">Level</span>
+                        </button>
+                      )}
+                      {result.debug.stat_debug &&
+                        [
+                          ...statDisplayOrder.filter((name) => result.debug?.stat_debug?.[name]),
+                          ...Object.keys(result.debug.stat_debug).filter(
+                            (name) => !statDisplayOrder.includes(name)
+                          ),
+                        ].map((name) => (
+                          <button
+                            key={name}
+                            type="button"
+                            className={`extract-verification-region-thumb${selectedDetail === name ? ' extract-verification-region-thumb--selected' : ''}`}
+                            onClick={() => setSelectedDetail(name)}
+                            aria-label={`Stat ${name}`}
+                            aria-pressed={selectedDetail === name}
+                            title={name}
+                          >
+                            <img
+                              src={dataUrlFromBase64(result.debug!.stat_debug![name].region)}
+                              alt=""
+                            />
+                            <span className="extract-verification-region-thumb-caption">{name}</span>
+                          </button>
+                        ))}
                     </div>
                   )}
-                </div>
+                </>
+              )}
+            </div>
+            <div className="extract-verification-image-wrap">
+              {currentItem && (
+                <>
+                  <img
+                    src={
+                      result?.debug?.region_card
+                        ? dataUrlFromBase64(result.debug.region_card)
+                        : getScreenshotUrl(currentItem.filename, currentItem.subdir, { crop: true })
+                    }
+                    alt="Card crop"
+                    className="extract-verification-image"
+                  />
+                  <p className="extract-verification-caption">
+                    {currentItem.subdir.split('/').pop()} / {currentItem.filename}
+                  </p>
+                </>
               )}
             </div>
           </div>
