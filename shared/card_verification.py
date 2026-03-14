@@ -13,6 +13,7 @@ import logging
 import re
 import shutil
 import tempfile
+import time
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -40,6 +41,12 @@ DIGIT_CLASS_NAMES: list[str] = [str(d) for d in range(10)] + ["none"]
 
 # Min fuzzywuzzy ratio to accept armor set match (legacy MIN_LEVENSHTEIN)
 SET_MATCH_MIN_RATIO = 65
+
+
+def _log_perf(phase: str, start: float) -> None:
+    """Log elapsed time in ms for a named phase."""
+    elapsed_ms = (time.perf_counter() - start) * 1000
+    logger.info("verify_card perf: %s took %.2f ms", phase, elapsed_ms)
 
 
 @dataclass
@@ -104,7 +111,11 @@ def verify_card(
         )
     logger.debug("verify_card: image loaded shape=%s", img.shape)
 
+    t_total = time.perf_counter()
+
+    t0 = time.perf_counter()
     boxes = compute_boxes(origin_x, origin_y, scale, image_type)
+    _log_perf("compute_boxes", t0)
     by_type: dict[str, list[dict]] = {}
     for b in boxes:
         by_type.setdefault(b["type"], []).append(b)
@@ -128,28 +139,30 @@ def verify_card(
     digit_path = _resolve_digit_model_path(data_dir) if digit_model_path is None else Path(digit_model_path)
 
     if icon_path is not None and icon_path.exists():
-        icon_model = _load_keras_model(icon_path)
+        t0 = time.perf_counter()
+        icon_model, icon_from_cache = _get_cached_model(icon_path, _ICON_MODEL_CACHE)
+        if not icon_from_cache and icon_model is not None:
+            _log_perf("icon_model_load", t0)
         if icon_model is not None:
             stat_crops = [_crop_box(img, b) for b in stat_boxes]
             stat_crops_56 = [_resize_stat_crop(c) for c in stat_crops]
             if stat_crops_56:
                 X = np.stack(stat_crops_56).astype(np.float32) / 255.0
+                t0 = time.perf_counter()
                 preds = icon_model.predict(X, verbose=0)
+                _log_perf("icon_model_predict", t0)
                 pred_indices = np.argmax(preds, axis=-1)
                 pred_indices_for_debug = pred_indices
                 num_classes = preds.shape[-1]
-                for i, idx in enumerate(pred_indices):
-                    idx = int(idx)
-                    if idx < len(ICON_CLASS_NAMES) and idx < num_classes:
-                        stat_type = ICON_CLASS_NAMES[idx]
-                        if stat_type != "none" and i < len(stat_crops):
-                            value = _read_stat_value(
-                                stat_crops[i],
-                                digit_model_path=digit_path,
-                                data_dir=data_dir,
-                            )
-                            if value is not None:
-                                stats[stat_type] = value
+                t0 = time.perf_counter()
+                stats.update(_read_all_stat_values_batched(
+                    stat_crops,
+                    pred_indices,
+                    num_classes,
+                    digit_path,
+                    data_dir,
+                ))
+                _log_perf("stat_values_all", t0)
         else:
             errors.append("Failed to load icon type model")
     else:
@@ -164,10 +177,13 @@ def verify_card(
     ocr_set_text = ""
     ocr_set_error = ""
     if set_boxes:
+        t0 = time.perf_counter()
         set_crop = _crop_box(img, set_boxes[0])
         if set_crop is not None and set_crop.size > 0:
             set_crop_processed = _preprocess_set_image(set_crop)
             armor_set, ocr_set_text, ocr_set_error = _read_armor_set(set_crop)
+        if set_boxes:
+            _log_perf("armor_set", t0)
     if armor_set is None and set_boxes:
         errors.append("Could not read armor set")
         if return_debug and (set_crop is None or set_crop.size == 0):
@@ -181,6 +197,7 @@ def verify_card(
     level_via_digit = False
     level_processed: np.ndarray | None = None
     if level_boxes:
+        t0 = time.perf_counter()
         level_merged = _merge_level_crops(img, level_boxes)
         if level_merged is not None:
             logger.debug("verify_card: level_merged shape=%s", level_merged.shape)
@@ -190,6 +207,8 @@ def verify_card(
                 digit_model_path=digit_model_path,
                 data_dir=data_dir,
             )
+        _log_perf("level", t0)
+        if level_merged is not None:
             logger.info(
                 "verify_card: level result current=%s max=%s via_digit=%s ocr_error=%s",
                 current_level, max_level, level_via_digit, ocr_level_error or "(none)",
@@ -248,6 +267,7 @@ def verify_card(
                 }
             debug["stat_debug"] = stat_debug
 
+    _log_perf("total", t_total)
     return VerificationResult(
         armor_set=armor_set,
         current_level=current_level,
@@ -385,6 +405,120 @@ def _load_keras_model(load_path: Path) -> Any | None:
         return None
 
 
+# Module-level caches keyed by resolved path string; reuse models across cards.
+_ICON_MODEL_CACHE: dict[str, Any] = {}
+_DIGIT_MODEL_CACHE: dict[str, Any] = {}
+
+
+def _get_cached_model(path: Path | str | None, cache: dict[str, Any]) -> tuple[Any | None, bool]:
+    """Return (model, from_cache). Load and cache on first use."""
+    if path is None:
+        return None, False
+    resolved = Path(path).resolve()
+    if not resolved.exists():
+        return None, False
+    key = str(resolved)
+    if key in cache:
+        return cache[key], True
+    model = _load_keras_model(resolved)
+    if model is not None:
+        cache[key] = model
+    return model, False
+
+
+def _digit_images_to_batch(digit_imgs: list[np.ndarray]) -> np.ndarray:
+    """Resize digit images to STAT_INPUT and stack as float batch (N, 56, 56, 3) in [0,1]."""
+    from PIL import Image
+    X_list = []
+    for d_img in digit_imgs:
+        rgb = d_img[:, :, ::-1] if d_img.shape[-1] == 3 else d_img
+        if rgb.ndim == 2:
+            rgb = np.stack([rgb, rgb, rgb], axis=-1)
+        pil = Image.fromarray(rgb).resize((STAT_INPUT_W, STAT_INPUT_H))
+        arr = np.array(pil, dtype=np.float32) / 255.0
+        X_list.append(arr)
+    return np.stack(X_list) if X_list else np.zeros((0, STAT_INPUT_H, STAT_INPUT_W, 3), dtype=np.float32)
+
+
+def _read_all_stat_values_batched(
+    stat_crops: list[np.ndarray],
+    pred_indices: np.ndarray,
+    num_classes: int,
+    digit_path: Path | None,
+    data_dir: Path | None,
+) -> dict[str, int]:
+    """
+    Extract stat types from icon pred_indices, extract digit crops from each stat,
+    run digit model once on the full batch, then interpret values per stat.
+    Returns dict stat_type -> value. Uses cached digit model.
+    """
+    from shared.stat_digit_extract import extract_digits
+
+    if data_dir is None:
+        data_dir = Path(__file__).resolve().parent.parent / "data"
+    path = digit_path if digit_path is not None else _resolve_digit_model_path(Path(data_dir))
+    if path is None or not Path(path).exists():
+        return {}
+
+    # Collect (stat_type, digit_arrays) for each non-none stat
+    entries: list[tuple[str, list[np.ndarray]]] = []
+    for i, idx in enumerate(pred_indices):
+        idx = int(idx)
+        if idx >= len(ICON_CLASS_NAMES) or idx >= num_classes or i >= len(stat_crops):
+            continue
+        stat_type = ICON_CLASS_NAMES[idx]
+        if stat_type == "none":
+            continue
+        crop = stat_crops[i]
+        if crop.shape[0] != STAT_INPUT_H or crop.shape[1] != STAT_INPUT_W:
+            from PIL import Image
+            pil = Image.fromarray(crop).resize((STAT_INPUT_W, STAT_INPUT_H))
+            crop = np.array(pil, dtype=np.uint8)
+        bgr = crop[:, :, ::-1].copy()
+        t0 = time.perf_counter()
+        digit_imgs = extract_digits(bgr)
+        _log_perf("stat_extract_digits", t0)
+        if not digit_imgs:
+            continue
+        entries.append((stat_type, digit_imgs))
+
+    if not entries:
+        return {}
+
+    t0 = time.perf_counter()
+    digit_model, from_cache = _get_cached_model(path, _DIGIT_MODEL_CACHE)
+    if not from_cache and digit_model is not None:
+        _log_perf("digit_model_load", t0)
+    if digit_model is None:
+        return {}
+
+    # Build one batch: all digit images in order; record (start_idx, end_idx, stat_type)
+    all_digits: list[np.ndarray] = []
+    boundaries: list[tuple[int, int, str]] = []
+    for stat_type, imgs in entries:
+        start = len(all_digits)
+        all_digits.extend(imgs)
+        boundaries.append((start, len(all_digits), stat_type))
+
+    X = _digit_images_to_batch(all_digits)
+    t0 = time.perf_counter()
+    preds = digit_model.predict(X, verbose=0)
+    _log_perf("digit_model_predict", t0)
+    indices = np.argmax(preds, axis=-1)
+
+    stats: dict[str, int] = {}
+    for start, end, stat_type in boundaries:
+        slice_indices = indices[start:end]
+        num = 0
+        for idx in slice_indices:
+            idx = int(idx)
+            if idx <= 9:
+                num = num * 10 + idx
+        if num > 0 or len(slice_indices) > 0:
+            stats[stat_type] = num
+    return stats
+
+
 def _read_stat_value(
     stat_crop: np.ndarray,
     *,
@@ -399,7 +533,9 @@ def _read_stat_value(
         pil = Image.fromarray(stat_crop).resize((STAT_INPUT_W, STAT_INPUT_H))
         stat_crop = np.array(pil, dtype=np.uint8)
     bgr = stat_crop[:, :, ::-1].copy()
+    t0 = time.perf_counter()
     digit_imgs = extract_digits(bgr)
+    _log_perf("stat_extract_digits", t0)
     if not digit_imgs:
         return None
     if data_dir is None:
@@ -407,7 +543,9 @@ def _read_stat_value(
     digit_path = digit_model_path if digit_model_path is not None else _resolve_digit_model_path(Path(data_dir))
     if digit_path is None or not Path(digit_path).exists():
         return None
+    t0 = time.perf_counter()
     model = _load_keras_model(Path(digit_path))
+    _log_perf("digit_model_load", t0)
     if model is None:
         return None
     # Prepare digit inputs: 56x56 RGB [0,1]
@@ -419,7 +557,9 @@ def _read_stat_value(
         arr = np.array(pil, dtype=np.float32) / 255.0
         X_list.append(arr)
     X = np.stack(X_list)
+    t0 = time.perf_counter()
     preds = model.predict(X, verbose=0)
+    _log_perf("digit_model_predict", t0)
     indices = np.argmax(preds, axis=-1)
     num = 0
     for idx in indices:
@@ -431,18 +571,22 @@ def _read_stat_value(
 
 def _read_armor_set(set_crop: np.ndarray) -> tuple[str | None, str, str]:
     """Preprocess set crop, OCR with pytesseract, fuzzy match to SET_TYPES. Returns (matched_name or None, raw_ocr_text, ocr_error)."""
+    t0 = time.perf_counter()
     processed = _preprocess_set_image(set_crop)
+    _log_perf("armor_set_preprocess", t0)
     try:
         import pytesseract
         from PIL import Image
+        t0 = time.perf_counter()
         guess = pytesseract.image_to_string(Image.fromarray(processed)).strip()
+        _log_perf("armor_set_ocr", t0)
     except Exception as e:
         logger.exception("OCR failed for armor set crop")
         return None, "", str(e)
     if not guess:
         return None, "", ""
     try:
-        from fuzzywuzzy import fuzz
+        from fuzzywuzzy import fuzz  # install python-Levenshtein for faster ratio()
     except ImportError:
         return None, guess, ""
     best_ratio = 0
@@ -563,7 +707,9 @@ def _read_level_via_digit(
     Parse level from binarized level image using digit detector. Expects format X / Y
     with 3, 4, or 5 clusters (slash in middle). Returns (current_level, max_level) or (None, None).
     """
+    t0 = time.perf_counter()
     clusters = extract_level_clusters(processed)
+    _log_perf("level_extract_clusters", t0)
     n_clusters = len(clusters)
     logger.debug("_read_level_via_digit: cluster count=%s", n_clusters)
     if n_clusters not in (3, 4, 5):
@@ -576,7 +722,10 @@ def _read_level_via_digit(
         logger.debug("_read_level_via_digit: no digit model at %s", digit_path)
         return None, None
     logger.debug("_read_level_via_digit: loading model from %s", digit_path)
-    model = _load_keras_model(Path(digit_path))
+    t0 = time.perf_counter()
+    model, from_cache = _get_cached_model(digit_path, _DIGIT_MODEL_CACHE)
+    if not from_cache and model is not None:
+        _log_perf("level_digit_model_load", t0)
     if model is None:
         logger.warning("_read_level_via_digit: failed to load keras model")
         return None, None
@@ -588,7 +737,9 @@ def _read_level_via_digit(
         arr = _level_cluster_to_model_input(crop)
         X_list.append(arr)
     X = np.stack(X_list)
+    t0 = time.perf_counter()
     preds = model.predict(X, verbose=0)
+    _log_perf("level_digit_model_predict", t0)
     indices = np.argmax(preds, axis=-1)
     digits = [int(idx) for idx in indices]
     logger.debug("_read_level_via_digit: model predictions (0-9=digit 10=slash) %s", digits)
@@ -614,7 +765,9 @@ def _read_level_ocr(merged: np.ndarray, processed: np.ndarray) -> tuple[int | No
             new_h = max(1, int(h * scale))
             logger.debug("_read_level_ocr: upscaling level image %sx%s -> %sx%s for tesseract", h, w, new_h, new_w)
             pil = pil.resize((new_w, new_h), Image.Resampling.NEAREST)
+        t0 = time.perf_counter()
         text = pytesseract.image_to_string(pil, config="--psm 7").strip()
+        _log_perf("level_ocr", t0)
     except ImportError:
         return None, None, "", "pytesseract or PIL not installed"
     except Exception as e:
@@ -642,7 +795,9 @@ def _read_level_from_merged(
     falls back to OCR. Expected format: "X / Y" (current / max).
     Returns (current_level, max_level, raw_ocr_text, ocr_error, level_via_digit).
     """
+    t0 = time.perf_counter()
     processed = _preprocess_level_image(merged)
+    _log_perf("level_preprocess", t0)
     current_level, max_level = _read_level_via_digit(
         processed,
         digit_model_path=digit_model_path,

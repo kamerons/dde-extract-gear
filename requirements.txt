@@ -12,3 +12,4 @@ matplotlib>=3.7.0
 tensorflow>=2.14.0
 pytesseract>=0.3.10
 fuzzywuzzy>=0.18.0
+python-Levenshtein>=0.21.0  # optional but much faster for fuzzywuzzy ratio()

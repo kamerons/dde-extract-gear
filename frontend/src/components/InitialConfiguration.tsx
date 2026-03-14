@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { StatType, BuildPreferences } from '../types';
+import type { StatType, BuildPreferences, Preset } from '../types';
 import { getDataFiles, getRequestFromPreferences } from '../api/recommendations';
 import { getStatDisplayName } from '../constants';
 import { ALL_STATS } from '../constants';
+import { getPresets, savePreset, deletePreset } from '../lib/presets';
 import { StatMultiSelect } from './StatMultiSelect';
 import { StatNumberInput } from './StatNumberInput';
 
@@ -33,6 +34,36 @@ export function InitialConfiguration({
   const [dataFiles, setDataFiles] = useState<string[]>([]);
   const [selectedDataFile, setSelectedDataFile] = useState<string>('');
   const [localWeights, setLocalWeights] = useState<Record<string, number>>({});
+  const [presets, setPresets] = useState<Preset[]>(() => getPresets());
+  const [newPresetName, setNewPresetName] = useState('');
+
+  const handleSavePreset = useCallback(() => {
+    const name = newPresetName.trim() || 'Unnamed preset';
+    const preferences: BuildPreferences = {
+      maximizeStats,
+      ignoreStats,
+      minConstraints,
+      softCaps,
+    };
+    savePreset({ name, preferences, dataFile: selectedDataFile || undefined });
+    setPresets(getPresets());
+    setNewPresetName('');
+  }, [maximizeStats, ignoreStats, minConstraints, softCaps, selectedDataFile, newPresetName]);
+
+  const handleLoadPreset = useCallback((preset: Preset) => {
+    setMaximizeStats(preset.preferences.maximizeStats);
+    setIgnoreStats(preset.preferences.ignoreStats);
+    setMinConstraints(preset.preferences.minConstraints ?? ({} as Record<StatType, number>));
+    setSoftCaps(preset.preferences.softCaps ?? ({} as Record<StatType, number>));
+    if (preset.dataFile) setSelectedDataFile(preset.dataFile);
+    const weights = getRequestFromPreferences(preset.preferences).weights;
+    setLocalWeights(weights);
+  }, []);
+
+  const handleDeletePreset = useCallback((id: string) => {
+    deletePreset(id);
+    setPresets(getPresets());
+  }, []);
 
   useEffect(() => {
     getDataFiles()
@@ -144,6 +175,56 @@ export function InitialConfiguration({
           </select>
         </div>
       )}
+
+      <div className="configuration-section presets-section">
+        <h3 className="stat-section-label">Presets</h3>
+        <p className="stat-section-description">
+          Save the current stat configuration and data file as a named preset, or load a saved preset.
+        </p>
+        <div className="presets-save-row">
+          <input
+            type="text"
+            value={newPresetName}
+            onChange={(e) => setNewPresetName(e.target.value)}
+            placeholder="Preset name"
+            className="preset-name-input"
+            aria-label="Preset name"
+          />
+          <button
+            type="button"
+            onClick={handleSavePreset}
+            className="preset-save-button"
+          >
+            Save current as preset
+          </button>
+        </div>
+        {presets.length > 0 && (
+          <ul className="presets-list" aria-label="Saved presets">
+            {presets.map((preset) => (
+              <li key={preset.id} className="preset-item">
+                <span className="preset-item-name">{preset.name}</span>
+                <div className="preset-item-actions">
+                  <button
+                    type="button"
+                    onClick={() => handleLoadPreset(preset)}
+                    className="preset-load-button"
+                  >
+                    Load
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDeletePreset(preset.id)}
+                    className="preset-delete-button"
+                    aria-label={`Delete preset ${preset.name}`}
+                  >
+                    Delete
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
 
       <div className="configuration-sections">
         <div className="configuration-section">

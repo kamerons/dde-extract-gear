@@ -4,15 +4,24 @@ import { WasteIndicator } from './WasteIndicator';
 import { getStatDisplayName, STAT_CATEGORIES } from '../constants';
 import type { StatType } from '../types';
 
+type RecommendationCardVariant = 'default' | 'detail';
+
 interface RecommendationCardProps {
   recommendation: Recommendation;
   rank: number;
+  variant?: RecommendationCardVariant;
   onCompareWith?: () => void;
   isCompareSelected?: boolean;
   onSelectAsBase?: () => void;
   isBaseSelected?: boolean;
   originalScore?: number;
   originalRank?: number;
+  onOpenInNewTab?: () => void;
+}
+
+function getPieceSourceLabel(piece: RecommendationPiece): 'Regular' | 'Blueprint' | null {
+  if (!piece.subdir) return null;
+  return piece.subdir.includes('blueprint') ? 'Blueprint' : 'Regular';
 }
 
 function formatScore(score: number): string {
@@ -42,15 +51,18 @@ function PieceLocation({ piece }: { piece: RecommendationPiece }) {
 export function RecommendationCard({
   recommendation,
   rank,
+  variant = 'default',
   onCompareWith,
   isCompareSelected,
   onSelectAsBase,
   isBaseSelected,
   originalScore,
   originalRank,
+  onOpenInNewTab,
 }: RecommendationCardProps) {
   const [expandedPieceIndex, setExpandedPieceIndex] = useState<number | null>(null);
-  const [armorPiecesExpanded, setArmorPiecesExpanded] = useState(false);
+  const [armorPiecesExpanded, setArmorPiecesExpanded] = useState(variant === 'detail');
+  const piecesExpanded = variant === 'detail' ? true : armorPiecesExpanded;
   const armorSetName = recommendation.pieces[0]?.armor_set || recommendation.set_id;
 
   const statsByCategory: Record<string, Array<[string, number]>> = {};
@@ -96,6 +108,16 @@ export function RecommendationCard({
             aria-pressed={isCompareSelected}
           >
             Compare with
+          </button>
+        )}
+        {onOpenInNewTab != null && (
+          <button
+            type="button"
+            className="open-in-new-tab-button"
+            onClick={onOpenInNewTab}
+            title="View in new tab"
+          >
+            View in new tab
           </button>
         )}
         <div className="recommendation-scores">
@@ -148,28 +170,36 @@ export function RecommendationCard({
       </div>
 
       <div className="recommendation-card-body">
-        <div className="recommendation-pieces">
-          <button
-            type="button"
-            className="recommendation-pieces-toggle"
-            onClick={() => setArmorPiecesExpanded((v) => !v)}
-            aria-expanded={armorPiecesExpanded}
-            aria-controls={`armor-pieces-list-${rank}`}
-            id={`armor-pieces-toggle-${rank}`}
-          >
-            <span className="recommendation-pieces-toggle-icon" aria-hidden>
-              {armorPiecesExpanded ? '\u25BC' : '\u25B6'}
-            </span>
-            <h3>Armor Pieces</h3>
-          </button>
-          {armorPiecesExpanded && (
+        <div className={`recommendation-pieces${variant === 'detail' ? ' recommendation-pieces--detail' : ''}`}>
+          {variant === 'detail' ? (
+            <h3 className="recommendation-pieces-heading" id={`armor-pieces-heading-${rank}`}>
+              Armor Pieces
+            </h3>
+          ) : (
+            <button
+              type="button"
+              className="recommendation-pieces-toggle"
+              onClick={() => setArmorPiecesExpanded((v) => !v)}
+              aria-expanded={armorPiecesExpanded}
+              aria-controls={`armor-pieces-list-${rank}`}
+              id={`armor-pieces-toggle-${rank}`}
+            >
+              <span className="recommendation-pieces-toggle-icon" aria-hidden>
+                {armorPiecesExpanded ? '\u25BC' : '\u25B6'}
+              </span>
+              <h3>Armor Pieces</h3>
+            </button>
+          )}
+          {piecesExpanded && (
           <div
             id={`armor-pieces-list-${rank}`}
             className="pieces-list"
             role="region"
-            aria-labelledby={`armor-pieces-toggle-${rank}`}
+            aria-labelledby={variant === 'detail' ? `armor-pieces-heading-${rank}` : `armor-pieces-toggle-${rank}`}
           >
-            {recommendation.pieces.map((piece, index) => (
+            {recommendation.pieces.map((piece, index) => {
+              const sourceLabel = getPieceSourceLabel(piece);
+              return (
               <div key={index} className="piece-item">
                 <button
                   type="button"
@@ -181,6 +211,11 @@ export function RecommendationCard({
                 >
                   <span className="piece-type">{piece.armor_type.replace(/_/g, ' ')}</span>
                   <span className="piece-level">Level {piece.current_level}/{piece.max_level}</span>
+                  {sourceLabel != null && (
+                    <span className={`piece-source-badge piece-source-badge--${sourceLabel.toLowerCase()}`}>
+                      {sourceLabel}
+                    </span>
+                  )}
                   <PieceLocation piece={piece} />
                 </button>
                 {expandedPieceIndex === index && (
@@ -191,6 +226,12 @@ export function RecommendationCard({
                     aria-labelledby={`piece-button-${rank}-${index}`}
                   >
                     <div className="piece-details-meta">
+                      {sourceLabel != null && (
+                        <div className="piece-details-row">
+                          <span className="piece-details-label">Source</span>
+                          <span className="piece-details-value">{sourceLabel}</span>
+                        </div>
+                      )}
                       {piece.filename != null && (
                         <div className="piece-details-row">
                           <span className="piece-details-label">File</span>
@@ -247,7 +288,8 @@ export function RecommendationCard({
                   </div>
                 )}
               </div>
-            ))}
+            );
+            })}
           </div>
           )}
         </div>

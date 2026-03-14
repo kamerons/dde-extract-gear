@@ -33,6 +33,14 @@ export interface BuildPreferences {
   softCaps: Record<StatType, number>;
 }
 
+/** Saved preset: named stat configuration + optional data file for the Recommendations config. */
+export interface Preset {
+  id: string;
+  name: string;
+  preferences: BuildPreferences;
+  dataFile?: string;
+}
+
 export interface RecommendationPiece {
   armor_set: string;
   armor_type: string;

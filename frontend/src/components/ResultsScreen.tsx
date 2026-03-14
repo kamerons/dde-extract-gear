@@ -121,6 +121,13 @@ export function ResultsScreen({
     });
   };
 
+  const handleOpenInNewTab = (rec: Recommendation) => {
+    const key = 'armor-detail-' + rec.set_id;
+    sessionStorage.setItem(key, JSON.stringify(rec));
+    const url = `${window.location.origin}/armor/${encodeURIComponent(rec.set_id)}`;
+    window.open(url, '_blank');
+  };
+
   // When user selects the second piece for comparison, scroll the comparison panel into view
   useEffect(() => {
     if (compareSelection[1] != null) {
@@ -470,6 +477,7 @@ export function ResultsScreen({
                           originalRank={
                             weightsDiffer ? originalRankBySetId.get(rec.set_id) : undefined
                           }
+                          onOpenInNewTab={() => handleOpenInNewTab(rec)}
                         />
                       </div>
                     ) : null;
@@ -496,6 +504,7 @@ export function ResultsScreen({
                   originalRank={
                     weightsDiffer ? originalRankBySetId.get(recommendation.set_id) : undefined
                   }
+                  onOpenInNewTab={() => handleOpenInNewTab(recommendation)}
                 />
               ))}
             </div>
