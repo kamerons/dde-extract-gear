@@ -26,6 +26,24 @@ interface FormulaConstants {
   description: string;
 }
 
+const ARMOR_DETAIL_STORAGE_KEY_PREFIX = 'armor-detail-';
+const ARMOR_DETAIL_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+interface StoredArmorDetailPayload {
+  recommendation: Recommendation;
+  createdAt: number;
+  expiresAt: number;
+}
+
+function createStoredArmorDetailPayload(rec: Recommendation): StoredArmorDetailPayload {
+  const createdAt = Date.now();
+  return {
+    recommendation: rec,
+    createdAt,
+    expiresAt: createdAt + ARMOR_DETAIL_TTL_MS,
+  };
+}
+
 /** Default formula constants (match backend StatNormalizer) so config pane is populated before task completes. */
 const DEFAULT_FORMULA_CONSTANTS: FormulaConstants = {
   description:
@@ -122,8 +140,13 @@ export function ResultsScreen({
   };
 
   const handleOpenInNewTab = (rec: Recommendation) => {
-    const key = 'armor-detail-' + rec.set_id;
-    sessionStorage.setItem(key, JSON.stringify(rec));
+    const key = ARMOR_DETAIL_STORAGE_KEY_PREFIX + rec.set_id;
+    const payload = createStoredArmorDetailPayload(rec);
+    try {
+      localStorage.setItem(key, JSON.stringify(payload));
+    } catch {
+      // Ignore storage failures and still attempt opening the detail route.
+    }
     const url = `${window.location.origin}/armor/${encodeURIComponent(rec.set_id)}`;
     window.open(url, '_blank');
   };

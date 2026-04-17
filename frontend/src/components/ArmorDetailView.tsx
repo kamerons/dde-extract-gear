@@ -4,11 +4,52 @@ import { RecommendationCard } from './RecommendationCard';
 
 const STORAGE_KEY_PREFIX = 'armor-detail-';
 
-function getRecommendationFromStorage(setId: string): Recommendation | null {
+interface StoredArmorDetailPayload {
+  recommendation: Recommendation;
+  createdAt?: number;
+  expiresAt?: number;
+}
+
+function isExpired(payload: StoredArmorDetailPayload): boolean {
+  return payload.expiresAt != null && Date.now() > payload.expiresAt;
+}
+
+function parseStoredPayload(raw: string): StoredArmorDetailPayload | null {
   try {
-    const raw = sessionStorage.getItem(STORAGE_KEY_PREFIX + setId);
-    if (!raw) return null;
-    return JSON.parse(raw) as Recommendation;
+    return JSON.parse(raw) as StoredArmorDetailPayload;
+  } catch {
+    return null;
+  }
+}
+
+function getRecommendationFromStorage(setId: string): Recommendation | null {
+  const key = STORAGE_KEY_PREFIX + setId;
+
+  // Prefer durable storage so links survive app/browser restarts.
+  try {
+    const localRaw = localStorage.getItem(key);
+    if (localRaw) {
+      const payload = parseStoredPayload(localRaw);
+      if (payload?.recommendation) {
+        if (isExpired(payload)) {
+          localStorage.removeItem(key);
+          return null;
+        }
+        return payload.recommendation;
+      }
+      // Corrupted or unknown payload format; clean up.
+      localStorage.removeItem(key);
+      return null;
+    }
+  } catch {
+    // Ignore durable storage access failures and continue with fallback.
+  }
+
+  // Backward-compatible fallback for tabs created before localStorage migration.
+  try {
+    const sessionRaw = sessionStorage.getItem(key);
+    if (!sessionRaw) return null;
+    return JSON.parse(sessionRaw) as Recommendation;
   } catch {
     return null;
   }
