@@ -1,13 +1,15 @@
-"""Produce unlabeled digit crops from armor run1 outlier screenshots (hero_hp and tower_hp only).
+"""Produce unlabeled digit crops from outlier screenshots (hero_hp and tower_hp only).
 
 Run from repo root: python scripts/produce_outlier_stat_digits.py
 
-Reads outlier filenames from data/collected/armor_run1_outliers.md, loads those screenshots from
-data/labeled/screenshots/regular/ (with companion .txt origin), extracts only hero_hp and tower_hp
-stat regions, runs digit extraction (shared.stat_digit_extract), and writes digit images to
-data/unlabeled/numbers/ with an outlier_ prefix. No interim card or stat-icon crops are saved.
+Reads outlier filenames from a markdown file (backtick-wrapped .png names). Resolves each file under
+data/labeled/screenshots/regular/ or .../blueprint/ (with companion .txt origin), extracts digit crops
+for requested stats (default hero_hp,tower_hp; use --stats e.g. hero_rate), runs
+shared.stat_digit_extract, and writes PNGs to data/unlabeled/numbers/ with an outlier_ prefix.
+Standard stats use fixed grid slots; unknown stat names fall back to the icon type model if present.
 """
 
+import argparse
 import re
 import sys
 from pathlib import Path
@@ -23,27 +25,101 @@ from shared.box_detector_augment import read_txt_origin
 from shared.extract_regions import compute_boxes
 from shared.stat_digit_extract import extract_digits
 
-# Stat grid slots for hero_hp and tower_hp (shared/extract_regions order: row0 4, row1 6, row2 4)
-HERO_HP_STAT_SLOT = 4
-TOWER_HP_STAT_SLOT = 10
+# Fixed stat grid slot indices: same row-major order as legacy STAT_OPTIONS /
+# collect UI (base, resists, hero row, tower row). See shared/extract_regions stat grid.
+FIXED_STAT_SLOTS = {
+    "hero_hp": 4,
+    "hero_dmg": 5,
+    "hero_rate": 6,
+    "hero_speed": 7,
+    "offense": 8,
+    "defense": 9,
+    "tower_hp": 10,
+    "tower_dmg": 11,
+    "tower_rate": 12,
+    "tower_range": 13,
+    "base": 0,
+    "fire": 1,
+    "electric": 2,
+    "poison": 3,
+}
 
 SCALE = 1.0
-IMAGE_TYPE = "regular"
+
+# Avoid reloading the icon Keras model on every screenshot in one run.
+_ICON_MODEL_SCRIPT_CACHE: dict = {}
+
+
+def _stat_slot_via_icon_model(
+    img_rgb: np.ndarray,
+    origin_x: int,
+    origin_y: int,
+    image_type: str,
+    data_dir: Path,
+    target_stat: str,
+    icon_model,
+) -> int | None:
+    """
+    Find which stat-box index the icon model classifies as target_stat (e.g. hero_rate).
+    Matches verify_card icon routing. Returns None if not found.
+    """
+    from shared.card_verification import ICON_CLASS_NAMES, _crop_box, _resize_stat_crop
+
+    boxes = compute_boxes(origin_x, origin_y, SCALE, image_type)
+    stat_boxes = [b for b in boxes if b.get("type") == "stat"]
+    if not stat_boxes or icon_model is None:
+        return None
+    stat_crops = [_crop_box(img_rgb, b) for b in stat_boxes]
+    stat_crops_56 = [_resize_stat_crop(c) for c in stat_crops]
+    X = np.stack(stat_crops_56).astype(np.float32) / 255.0
+    preds = icon_model.predict(X, verbose=0)
+    pred_indices = np.argmax(preds, axis=-1)
+    for i, idx in enumerate(pred_indices):
+        idx = int(idx)
+        if idx >= len(ICON_CLASS_NAMES):
+            continue
+        if ICON_CLASS_NAMES[idx] == target_stat:
+            return i
+    return None
+
+
+def _resolve_screenshot(
+    data_dir: Path, filename: str
+) -> tuple[Path, Path, str] | None:
+    """Return (png_path, txt_path, image_type) for regular or blueprint, or None if missing."""
+    for image_type in ("regular", "blueprint"):
+        base = data_dir / "labeled" / "screenshots" / image_type
+        png_path = base / filename
+        if png_path.is_file():
+            return png_path, png_path.with_suffix(".txt"), image_type
+    return None
+
+
+def _parse_stats_csv(stats_csv: str) -> list[str]:
+    return [s.strip() for s in stats_csv.split(",") if s.strip()]
 
 
 def produce_outlier_stat_digits(
     data_dir: Path | None = None,
     outliers_md_path: Path | None = None,
     out_dir: Path | None = None,
+    stats: list[str] | None = None,
 ) -> int:
     """
-    Produce unlabeled digit PNGs from outlier screenshots (hero_hp and tower_hp only).
+    Produce unlabeled digit PNGs from outlier screenshots for named stats.
+
+    hero_hp and tower_hp use fixed grid slots; other stats (e.g. hero_rate) need the
+    icon type model to find which stat box is which.
 
     Returns the number of digit images written.
     """
+    from shared.card_verification import _get_cached_model, _resolve_icon_model_path
+
     data_dir = data_dir or _repo_root / "data"
+    data_dir = Path(data_dir).resolve()
     out_dir = out_dir or (data_dir / "unlabeled" / "numbers")
     outliers_md_path = outliers_md_path or (data_dir / "collected" / "armor_run1_outliers.md")
+    stat_names = stats if stats is not None else ["hero_hp", "tower_hp"]
 
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -52,20 +128,29 @@ def produce_outlier_stat_digits(
         print("No outlier filenames found in " + str(outliers_md_path) + ".")
         return 0
 
-    screenshots_dir = data_dir / "labeled" / "screenshots" / IMAGE_TYPE
-    if not screenshots_dir.exists():
-        print("Screenshots dir not found: " + str(screenshots_dir))
-        return 0
+    needs_icon = any(name not in FIXED_STAT_SLOTS for name in stat_names)
+    icon_model = None
+    icon_path = _resolve_icon_model_path(data_dir)
+    if needs_icon:
+        if icon_path is None or not icon_path.exists():
+            print("Icon type model required for non-fixed stats but not found under data/models/icon_type_detection.")
+            return 0
+        icon_model, _ = _get_cached_model(icon_path, _ICON_MODEL_SCRIPT_CACHE)
 
     total_written = 0
     skipped = []
 
+    def in_bounds(b: dict, img_w: int, img_h: int) -> bool:
+        x, y = b["x"], b["y"]
+        w, h = b["width"], b["height"]
+        return x >= 0 and y >= 0 and x + w <= img_w and y + h <= img_h
+
     for filename in filenames:
-        png_path = screenshots_dir / filename
-        txt_path = png_path.with_suffix(".txt")
-        if not png_path.exists():
-            skipped.append((filename, "PNG missing"))
+        resolved = _resolve_screenshot(data_dir, filename)
+        if resolved is None:
+            skipped.append((filename, "PNG missing under regular/ and blueprint/"))
             continue
+        png_path, txt_path, image_type = resolved
         if not txt_path.exists():
             skipped.append((filename, "origin .txt missing"))
             continue
@@ -82,28 +167,42 @@ def produce_outlier_stat_digits(
             continue
 
         img_height, img_width = img_rgb.shape[:2]
-        boxes = compute_boxes(origin_x, origin_y, SCALE, IMAGE_TYPE)
+        boxes = compute_boxes(origin_x, origin_y, SCALE, image_type)
         stat_boxes = [b for b in boxes if b.get("type") == "stat"]
-        if len(stat_boxes) < max(HERO_HP_STAT_SLOT, TOWER_HP_STAT_SLOT) + 1:
+        if len(stat_boxes) < 14:
             skipped.append((filename, "expected 14 stat boxes, got " + str(len(stat_boxes))))
-            continue
-
-        hero_box = stat_boxes[HERO_HP_STAT_SLOT]
-        tower_box = stat_boxes[TOWER_HP_STAT_SLOT]
-
-        def in_bounds(b: dict) -> bool:
-            x, y = b["x"], b["y"]
-            w, h = b["width"], b["height"]
-            return x >= 0 and y >= 0 and x + w <= img_width and y + h <= img_height
-
-        if not in_bounds(hero_box) or not in_bounds(tower_box):
-            skipped.append((filename, "stat box out of image bounds"))
             continue
 
         stem = png_path.stem
 
-        for stat_slot, stat_name in ((HERO_HP_STAT_SLOT, "hero_hp"), (TOWER_HP_STAT_SLOT, "tower_hp")):
+        for stat_name in stat_names:
+            if stat_name in FIXED_STAT_SLOTS:
+                stat_slot = FIXED_STAT_SLOTS[stat_name]
+            else:
+                if icon_model is None:
+                    skipped.append((filename, "no icon model for " + stat_name))
+                    break
+                stat_slot = _stat_slot_via_icon_model(
+                    img_rgb,
+                    origin_x,
+                    origin_y,
+                    image_type,
+                    data_dir,
+                    stat_name,
+                    icon_model,
+                )
+                if stat_slot is None:
+                    skipped.append((filename, "icon model did not find slot for " + stat_name))
+                    break
+
+            if stat_slot >= len(stat_boxes):
+                skipped.append((filename, "stat slot out of range for " + stat_name))
+                break
             b = stat_boxes[stat_slot]
+            if not in_bounds(b, img_width, img_height):
+                skipped.append((filename, "stat box out of image bounds for " + stat_name))
+                break
+
             x, y, w, h = b["x"], b["y"], b["width"], b["height"]
             crop_rgb = img_rgb[y : y + h, x : x + w]
             crop_bgr = crop_rgb[:, :, ::-1].copy()
@@ -134,7 +233,35 @@ def _parse_outlier_filenames(md_path: Path) -> list[str]:
 
 
 def main() -> None:
-    produce_outlier_stat_digits()
+    parser = argparse.ArgumentParser(
+        description="Extract digit crops for listed stats from outlier screenshots (fixed slots or icon model)."
+    )
+    parser.add_argument(
+        "--outliers-md",
+        type=Path,
+        default=None,
+        help="Markdown file with backtick-wrapped .png filenames (default: armor_run1_outliers.md)",
+    )
+    parser.add_argument(
+        "--data-dir",
+        type=Path,
+        default=None,
+        help="Data directory (default: repo data/)",
+    )
+    parser.add_argument(
+        "--stats",
+        type=str,
+        default="hero_hp,tower_hp",
+        help="Comma-separated stats to extract (default: hero_hp,tower_hp). "
+        "Other names (e.g. hero_rate) use the icon type model to locate the box.",
+    )
+    args = parser.parse_args()
+    stats_list = _parse_stats_csv(args.stats)
+    produce_outlier_stat_digits(
+        data_dir=args.data_dir,
+        outliers_md_path=args.outliers_md,
+        stats=stats_list,
+    )
 
 
 if __name__ == "__main__":

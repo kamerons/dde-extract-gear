@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
 """
-Recalculate stats for armor Run1 outlier records via the verification API.
+Recalculate stats for collected armor records via the verification API.
 
-Reads outlier filenames from data/collected/armor_run1_outliers.md, loads
-data/collected/armor_run1.json, calls the API verify endpoint for each matching
-record, and updates those records in place (stats, armor_set, current_level,
-max_level, error). Writes the updated list back to armor_run1.json.
+Reads outlier screenshot filenames from a markdown file (backtick-wrapped .png
+names; optional numbered list lines like run1 docs), loads a collected armor
+JSON, calls POST /api/extract/verify for each matching record, and updates
+those records in place (stats, armor_set, current_level, max_level, error).
 
-Requires the API (and task container) to be running. Run from repo root:
+Requires the API (and task worker) to be running. Run from repo root:
+
   python scripts/recalculate_outlier_stats.py
+  python scripts/recalculate_outlier_stats.py \\
+    --armor-json data/collected/armor_insane_splendid.json \\
+    --outliers-md data/collected/armor_insane_splendid_hp_outliers.md
   python scripts/recalculate_outlier_stats.py --api-url http://localhost:8000
 """
 
@@ -33,11 +37,11 @@ REQUEST_TIMEOUT_SEC = 120
 
 
 def _outlier_filenames_from_md(md_path: Path) -> set[str]:
-    """Parse markdown and return set of outlier filenames (e.g. run1_belt_p1_r3_c5_0154.png)."""
+    """Parse markdown and return set of outlier filenames (backtick-wrapped .png)."""
     text = md_path.read_text()
-    # Lines like: 1. `run1_belt_p1_r3_c5_0154.png`
-    pattern = re.compile(r"^\d+\.\s*`([^`]+\.png)`", re.MULTILINE)
-    return set(m.group(1) for m in pattern.finditer(text))
+    # Numbered: 1. `run1_....png`  or plain: `insane_splendid_....png`
+    pattern = re.compile(r"`([^`]+\.png)`")
+    return set(pattern.findall(text))
 
 
 def _get_api_base_url(api_url: str | None) -> str:
@@ -83,8 +87,23 @@ def _poll_task(base_url: str, task_id: str, timeout: int = POLL_TIMEOUT_SEC) -> 
 
 
 def main() -> int:
+    default_md = REPO_ROOT / "data" / "collected" / "armor_run1_outliers.md"
+    default_json = REPO_ROOT / "data" / "collected" / "armor_run1.json"
+
     parser = argparse.ArgumentParser(
-        description="Recalculate stats for armor_run1 outliers via the verification API."
+        description="Recalculate stats for outlier armor records via the verification API."
+    )
+    parser.add_argument(
+        "--armor-json",
+        type=Path,
+        default=default_json,
+        help=f"Collected armor JSON to read and update (default: {default_json})",
+    )
+    parser.add_argument(
+        "--outliers-md",
+        type=Path,
+        default=default_md,
+        help=f"Markdown listing outlier .png filenames (default: {default_md})",
     )
     parser.add_argument(
         "--api-url",
@@ -103,8 +122,8 @@ def main() -> int:
         print("urllib required for API calls.", file=sys.stderr)
         return 1
 
-    outliers_md = REPO_ROOT / "data" / "collected" / "armor_run1_outliers.md"
-    armor_json = REPO_ROOT / "data" / "collected" / "armor_run1.json"
+    outliers_md = args.outliers_md.resolve()
+    armor_json = args.armor_json.resolve()
 
     if not outliers_md.exists():
         print(f"Missing: {outliers_md}", file=sys.stderr)
