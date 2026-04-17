@@ -6,6 +6,7 @@ env
 data/*.keras
 data/**/*.txt
 data/models/
+data/**/*.md
 .vscode
 
 venv/
